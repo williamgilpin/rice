@@ -377,7 +377,7 @@ class CausalDetection:
         ## Outer index runs over causes, which we use for lookups into the downstream
         ## causees. 
         for i in range(m):
-
+            debug_print(1)
             if self.neighbors == "simplex":
                 wgts, idx, sig = simplex_neighbors(Xe[i], k=min(ntx - 1, self.k), tol=tol)
             else:
@@ -521,8 +521,10 @@ class CausalDetection:
 
         # For each response, fit a ridge regression model over timepoints
         # To assign a causal score to each upstream gene
+
+        debug_print(10)
         for i in range(m):
-            
+            debug_print(10*i+500)
             # Loop over responses
             Xd, Yd = all_y_pred[:, i].T, all_y_true[i][:, None] # sweep downstreams
             # Xd, Yd = all_y_pred[i].T, all_y_true[i][:, None] # sweep upstreams
@@ -541,7 +543,6 @@ class CausalDetection:
             # A = ridge.coef_.T.squeeze()
             # A = np.abs(A)
             # A *= r2
-            
             ## Strong regularization limit
             A = (Xd.T @ Yd).T
             Yd_pred = Xd @ A.T
@@ -556,6 +557,7 @@ class CausalDetection:
             causal_matrix[:, i] = A.squeeze()
 
         np.fill_diagonal(causal_matrix, 0)
+        debug_print(2)
         return causal_matrix
 
 
@@ -585,15 +587,15 @@ class CausalDetection:
                 cmat = np.nanmax([cmat, self.fit(X, y)], axis=0)
                 self.sweep_d_embed = True
             return cmat
-
+        debug_print("start")
         if y is None:
             y = X
-
+        
         self.n = X.shape[0]
 
         if self.library_sizes is None:
             if self.max_library_size is None:
-                self.library_sizes = np.arange(1, int(np.floor(self.n  / (self.d_embed + 1))))[::-1]
+                self.library_sizes = np.arange(1, int(np.floor(self.n  / (self.d_embed + 1))))[::-1][-2:][::-1]
                 # self.library_sizes = (2 ** np.arange(0, int(np.floor(np.log2(self.n  / (self.d_embed + 1)))))).astype(int)[::-1]
             else:
                 self.library_sizes = np.unique(np.linspace(1, int(np.floor(self.n  / (self.d_embed + 1))), self.max_library_size).astype(int))[::-1]
