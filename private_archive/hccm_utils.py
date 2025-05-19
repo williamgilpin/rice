@@ -1,0 +1,585 @@
+"""
+Utilities for processing and transforming time series datasets, with a particular
+focus on vectorizing over batches of time series.
+
+"""
+
+import numpy as np
+
+from scipy.linalg import hankel
+
+import heapq
+
+class FiniteDict:
+    """
+    A dictionary with a maximum number of elements, which can have values
+
+    Attributes:
+        n (int): Maximum number of elements
+        data (dict): Dictionary of index pairs and values
+        heap (list): List of index pairs
+        mergefunc (function): Function to merge values when updating
+    """
+    def __init__(self, n, mergefunc=max):
+        self.n = n
+        self.mergefunc = mergefunc
+        self.data = {}
+        self.heap = []
+
+    def update(self, index_pair, value):
+        # Ensure the index_pair is always a tuple of integers
+        index_pair = tuple(map(int, index_pair))
+        value = float(value)
+        
+        if index_pair in self.data:
+            # Update the value in the data dictionary
+            self.data[index_pair] += value
+            # Push the updated value onto the heap
+            heapq.heappush(self.heap, (self.data[index_pair], index_pair))
+        else:
+            if len(self.data) < self.n:
+                # If under capacity, add the new index_pair
+                self.data[index_pair] = value
+                heapq.heappush(self.heap, (value, index_pair))
+            else:
+                # If at capacity, check if the new value is greater than the smallest in the heap
+                while self.heap and self.heap[0][1] not in self.data:
+                    # Remove stale elements from the heap
+                    heapq.heappop(self.heap)
+                
+                if value > self.heap[0][0]:
+                    # Remove the smallest element from the heap and the data dictionary
+                    _, smallest_index_pair = heapq.heappop(self.heap)
+                    del self.data[smallest_index_pair]
+                    
+                    # Add the new element
+                    self.data[index_pair] = value
+                    heapq.heappush(self.heap, (value, index_pair))
+
+    def update_batch(self, index_pairs, values):
+        """Given a batch of index pairs and values, update the dictionary"""
+        if not hasattr(values, '__iter__'):
+            values = (values for _ in range(len(index_pairs)))
+        for index_pair, value in zip(index_pairs, values):
+            self.update(index_pair, value)
+
+    def __repr__(self):
+        return str(self.data)
+
+def mask_topk(arr, k=1):
+    """
+    Given an array, mask all but the top k elements
+    
+    Args:
+        arr (np.ndarray): Array to mask
+        k (int): Number of elements to keep unmasked
+
+    Returns:
+        np.ndarray: Masked array
+    """
+    mask = np.zeros_like(arr).ravel()
+    idx = np.argsort(arr.ravel())[ -k:]
+    mask[idx] = 1
+    mask = mask.reshape(arr.shape)
+    return mask
+
+def hankel_matrix(data, q, p=None):
+    """
+    Find the Hankel matrix dimensionwise for multiple multidimensional 
+    time series
+    
+    Args:
+        data (ndarray): An array of shape (N, T, 1) or (N, T, D) corresponding to a 
+            collection of N time series of length T and dimensionality D
+        q (int): The width of the matrix (the number of features)
+        p (int): The height of the matrix (the number of samples)
+        
+    Returns:
+        hmat (ndarray): An array of shape (N, T - p, D, q) containing the Hankel
+            matrices for each time series
+
+    """
+    
+    if len(data.shape) == 3:
+        return np.stack([_hankel_matrix(item, q, p) for item in data])
+    
+    if len(data.shape) == 1:
+        data = data[:, None]
+    hmat = _hankel_matrix(data, q, p)    
+    return hmat
+    
+
+def _hankel_matrix(data, q, p=None):
+    """
+    Calculate the hankel matrix of a multivariate timeseries
+    
+    Args:
+        data (ndarray): T x D multidimensional time series
+        q (int): The number of columns in the Hankel matrix
+        p (int): The number of rows in the Hankel matrix
+
+    Returns:
+        ndarray: The Hankel matrix of shape (T - p, D, q)
+    """
+    if len(data.shape) == 1:
+        data = data[:, None]
+
+    # Hankel parameters
+    if not p:
+        p = len(data) - q
+    all_hmats = list()
+    for row in data.T:
+        first, last = row[-(p + q) : -p], row[-p - 1 :]
+        out = hankel(first, last)
+        all_hmats.append(out)
+    out = np.dstack(all_hmats)
+    return np.transpose(out, (1, 0, 2))[:-1]
+
+def batch_diag(array, axis=0):
+    """Give a multidimensional array, create a diagonal matrix for each row along the 
+    specified axis.
+
+    Args:
+        array (np.ndarray): The input array
+        axis (int): The axis along which to create the diagonal matrices
+
+    Returns:
+        np.ndarray: The output array
+
+    Example:
+        >>> array = np.random.randn(3, 4, 5)
+        >>> a = batch_diag(array, axis=0)
+        >>> a.shape
+        (3, 3, 4, 5)
+    """
+    input_shape = array.shape
+    if axis < 0:
+        axis = len(input_shape) + axis
+    n = input_shape[axis]
+    remaining_dims = np.delete(np.arange(len(input_shape)), axis)
+    remaining_dims[remaining_dims > axis] += 1
+    id = np.expand_dims(np.eye(n), tuple(remaining_dims))
+    array = np.expand_dims(array, axis)
+    out = array * id
+    return out
+
+def embed_ts(X, m, padding="constant"):
+    """
+    Create a time delay embedding of a time series or a set of time series
+
+    Args:
+        X (array-like): A matrix of shape (n_timepoints, n_dims) or 
+            of shape (n_timepoints)
+        m (int): The number of dimensions
+
+    Returns:
+        Xp (array-like): A time-delay embedding
+    """
+    X = X.copy()[::-1]
+    if padding:
+        if len(X.shape) == 1:
+            X = np.pad(X, [m, m], padding)
+        if len(X.shape) == 2:
+            X = np.pad(X, [[m, m], [0, 0]], padding)
+        if len(X.shape) == 3:
+            X = np.pad(X, [[0, 0], [m, m], [0, 0]], padding)
+    Xp = hankel_matrix(X, m)
+    Xp = np.moveaxis(Xp, (0, 1, 2), (1, 2, 0))
+    Xp = Xp[:, ::-1, ::-1]
+    Xp = Xp[:, m-1:-m]
+    return Xp
+
+
+def multivariate_embed_ts(X, m, **kwargs):
+    """
+    Create a flattened time delay embedding of a multivariate time series
+
+    Args:
+        X (array-like): A matrix of shape (n_timepoints, n_dims)
+        m (int): The number of dimensions
+
+    Returns:
+        Xp (array-like): A time-delay embedding of shape (n_timepoints, n_dims * m)
+    """
+    Xe = embed_ts(X, m=m, **kwargs)
+    Xe = np.moveaxis(Xe, 1, 0)
+    Xe_flat = np.reshape(Xe, (Xe.shape[0], -1))
+    # Xe_flat = np.transpose(Xe, (1, 0, 2)).reshape(Xe.shape[1], -1, order="F")
+    return Xe_flat
+
+
+from scipy.sparse.linalg import svds
+def project_pca(X, k=1):
+    """
+    Perform PCA on the dataset X and return the projection onto the top k principal components.
+
+    Args:
+        X (numpy.ndarray): The input dataset of shape (N, M).
+        k (int): The number of principal components to project onto.
+
+    Returns:
+        numpy.ndarray: The dataset projected onto the top k principal components of 
+            shape (N, k).
+    """
+    if X.shape[1] <= k:
+        return X
+    X_centered = X - np.mean(X, axis=0)
+    U, S, Vt = svds(X_centered, k=k)
+    
+    # Sort the singular values and corresponding vectors in descending order
+    idx = np.argsort(-S)
+    U = U[:, idx]
+    S = S[idx]
+    Vt = Vt[idx, :]
+    
+    # Project the data onto the top k principal components
+    X_projected = np.dot(U, np.diag(S))
+    
+    return X_projected
+
+def batch_pca(X0):
+    """
+    Given a tensor of shape batch, N, M, perform PCA on the last two dimensions
+    
+    Args:
+        X0 (ndarray): A tensor of shape (batch, N, M)
+
+    Returns:
+        eivals (ndarray): Eigenvalues of the covariance matrix, sorted in descending 
+            order. Shape is (batch, M)
+        eivecs (ndarray): Eigenvectors of the covariance matrix, sorted in descending
+            order along last index. Shape is (batch, M, M), where the last index is the
+            eigenvector index that pairs with the corresponding eigenvalue.
+    
+    """
+    X = X0.copy()
+    X -= np.mean(X, axis=-1, keepdims=True)
+    cov = np.einsum('ijk,ijm->ikm', X, X) / (X.shape[1] - 1)
+
+    eigsys = np.linalg.eigh(cov)
+    eivals = eigsys[0][:, ::-1]
+    eivecs = eigsys[1][..., ::-1]
+
+    return eivals, eivecs
+
+
+
+def embed_ts_pca(X, m=10, scaled=False):
+    """
+    Embed a univariate time series data using PCA
+
+    Args:
+        X (np.ndarray): Time series data
+        m (int): Embedding dimension
+        scaled (bool): Whether to scale transformed data features by the eigenvalues
+
+    Returns:
+        np.ndarray: Embedded time series data
+    """
+    Xe = embed_ts(X, m=m)
+    eigvals, pca_vecs = batch_pca(Xe)
+    Xe_proj = np.einsum('itm,imk->itk', Xe, pca_vecs)
+    if scaled:
+        eigvals = np.real(eigvals)
+        eigvals[eigvals < 0] = 0
+        scale_factors = batch_diag(np.sqrt(eigvals), axis=-1)
+        Xe_proj = Xe_proj @ scale_factors
+    return Xe_proj
+
+# from scipy.linalg import eigh
+from scipy.signal import savgol_filter
+def batch_sfa(X, num_features, return_transform=False, savgol_settings=None):
+    """
+    Perform Slow Feature Analysis (SFA) on the data matrix X.
+    
+    Args:
+        X (numpy.ndarray): The data matrix of shape (B, N, M).
+        num_features (int): The number of slow features to extract.
+        savgol_settings (dict): The settings for the Savitzky-Golay filter. These are 
+            the window and polynomial order typically passed to 
+            scipy.signal.savgol_filter. If this argument is None, then the 
+            finite-difference time-derivatives are used instead of the Savitzky-Golay
+            filter.
+    
+    Returns:
+        S (numpy.ndarray): The slow features of shape (B, N, num_features).
+        W (numpy.ndarray): The transformation matrix of shape (B, M, num_features).
+        E (numpy.ndarray): The eigenvalues of the generalized eigenvalue problem of
+            shape (B, num_features).
+    """
+    B, N, M = X.shape
+    
+    # Compute the finite-difference time-derivatives or use the Savitzky-Golay filter
+    if savgol_settings is not None:
+        dX = savgol_filter(X, **savgol_settings, axis=1, deriv=1)
+    else:
+        dX = np.diff(X, axis=1)
+        dX = np.pad(dX, ((0, 0), (1, 0), (0, 0)), mode='constant')
+
+    # Compute the covariance matrix of the original data and the time-derivatives
+    C_X = np.einsum('bij,bik->bjk', X, X) / N
+    C_dX = np.einsum('bij,bik->bjk', dX, dX) / (N - 1)
+
+    ## Solve the generalized eigenvalue problem, and sort the eigenvectors by eigenvalues
+    eigenvalues, eigenvectors = np.linalg.eigh(np.linalg.inv(C_X) @ C_dX)
+    # print(eigenvalues.shape, eigenvectors.shape)
+    idx = np.argsort(eigenvalues, axis=1)
+    # W = np.array([eigenvectors[i, :, idx[i, :num_features]] for i in range(B)])
+    batch_indices = np.arange(eigenvectors.shape[0])[:, None, None]
+    vector_component_indices = np.arange(eigenvectors.shape[1])[None, :, None]
+    W = eigenvectors[batch_indices,  vector_component_indices, idx[:, None, :num_features]] # (xx, xxx, )
+    E = eigenvalues[batch_indices, idx[:, :num_features]]
+    # print(W.shape, eigenvectors.shape, idx[:, None, :num_features].shape)
+
+
+
+    # Project the original data onto the slow features
+    # print(X.shape, W.shape)
+    S = np.einsum('bij,bkj->bik', X, W)
+    if return_transform:
+        return S, W, E
+    else:
+        return S
+    
+def embed_ts_sfa(X, m=10, scaled=False):
+    """
+    Embed a univariate time series data using PCA
+
+    Args:
+        X (np.ndarray): Time series data
+        m (int): Embedding dimension
+        scaled (bool): Whether to scale transformed data features by the eigenvalues
+
+    Returns:
+        np.ndarray: Embedded time series data
+    """
+    Xe = embed_ts(X, m=m)
+    # print(Xe.shape)
+    Xe_sfa, W, E = batch_sfa(Xe, m, return_transform=True)
+    if scaled:
+        eigvals = np.real(E)
+        # eigvals[eigvals < 0] = 0
+        # scale_factors = batch_diag(np.sqrt(eigvals), axis=-1)
+        # Xe_sfa = Xe_sfa @ scale_factors
+    return Xe_sfa
+
+
+from scipy.stats import t as t_dist
+def batch_pearson(x, y=None, pvalue=False):
+    """
+    Calculate the Pearson correlation between two sets of time series along the 
+    last axis
+    
+    Args:
+        x (ndarray): A tensor of shape (batch, N, M)
+        y (ndarray): A tensor of shape (batch, N, M). If None, the sorted values of the 
+            x time series are used and the Pearson correlation is calculated
+            relative to these sorted values
+        pvalue (bool): Whether to return the p-value of the correlation
+    
+    Returns:
+        corr (ndarray): A tensor of shape (batch, N) containing the Pearson correlation
+            between each pair of time series
+    """
+    if y is None:
+        y = np.sort(x, axis=-1)
+    xc = x.copy() - np.mean(x, axis=-1, keepdims=True)
+    yc = y.copy() - np.mean(y, axis=-1, keepdims=True)
+    corr = np.sum(xc * yc, axis=-1) / np.sqrt(np.sum(xc ** 2, axis=-1) * np.sum(yc ** 2, axis=-1))
+    # corr = np.nan_to_num(corr, nan=0.0)
+    if pvalue:
+        n = x.shape[-1]
+        t_stat = corr * np.sqrt((n - 2) / (1e-6 + 1 - corr ** 2))
+        # except:
+        #     print(corr, n, flush=True)
+        #     t_stat = corr * np.sqrt((n - 2) / (1e-2 + 1 - corr ** 2))
+        p_value = 2 * t_dist.sf(np.abs(t_stat), df=n-2)
+        return corr, p_value
+    return corr
+
+def batch_spearman(x, y=None, pvalue=False):
+    """
+    Calculate the Spearman correlation between two sets of time series along the
+    last axis
+
+    Args:
+        x (ndarray): A tensor of shape (batch, N, M)
+        y (ndarray): A tensor of shape (batch, N, M). If None, the indices of the
+            time series are used and the Spearman correlation is calculated
+            relative to a monotonic function
+        pvalue (bool): Whether to return the p-value of the correlation
+
+    Returns:
+        corr (ndarray): A tensor of shape (batch, N) containing the Spearman correlation
+            between each pair of time series
+    """
+    if y is None:
+        y = np.arange(x.shape[-1])[None, :]
+    xrank = np.argsort(np.argsort(x, axis=-1), axis=-1).astype(np.float32)
+    yrank = np.argsort(np.argsort(y, axis=-1), axis=-1).astype(np.float32)
+    return batch_pearson(xrank, yrank, pvalue=pvalue)
+
+def progress_bar(i, n, n_bar=20):
+    """
+    Print a progress bar to stdout
+
+    Args:
+        i (int): Current iteration
+        n (int): Total number of iterations
+        n_bar (int): Number of characters in the progress bar
+
+    Returns:
+        None
+    """
+    idots = int(i / n * n_bar)
+    stars = '#' * idots
+    spaces = ' ' * (n_bar - idots)
+    bar_str = f"[{stars}{spaces}] "
+    print(bar_str, end='\r')
+    if i == n - 1:
+        print("\n")
+    return None
+
+def flatten_along_axis(a, axes):
+    """
+    Flattens a NumPy array along the specified axes.
+
+    Args:
+        array (np.ndarray): The input array.
+        axes (tuple or list): Axes to flatten.
+
+    Returns:
+        np.ndarray: A reshaped array with specified axes flattened.
+    """
+    # Ensure axes are sorted for consistent behavior
+    axes = sorted(axes)
+    if any(ax < 0 or ax >= a.ndim for ax in axes):
+        raise ValueError(f"Axes {axes} are out of bounds for array with {a.ndim} dimensions.")
+
+    # First we reorder the axes to flatten at the end
+    unflattened_axes = [i for i in range(a.ndim) if i not in axes]
+    new_order = unflattened_axes + axes
+    reordered = np.moveaxis(a, new_order, range(a.ndim))
+    flattened_shape = reordered.shape[:len(unflattened_axes)] + (-1,)
+    return reordered.reshape(flattened_shape)
+
+from sklearn.linear_model import Ridge
+from scipy.stats import t
+def max_linear_correlation_ridge(A, B, alpha=1e-3, return_pvalue=False):
+    """
+    Compute the maximum linear correlation between each column of B and any linear 
+    combination of columns of A. A represents the cause(s) and B the effect.
+
+    Args:
+        A (np.ndarray): A matrix of shape (T, N)
+        B (np.ndarray): A matrix of shape (T, M)
+        alpha (float): Ridge regularization parameter. Defaults to 1e-3
+        return_pvalue (bool): Whether to return the p-value of the correlation. 
+            Defaults to False
+
+    Returns:
+        np.ndarray: An array of shape (M,) containing the maximum correlation
+            between each column of B and a linear combination of columns of A
+    """
+    # ATA = A.T @ A
+    # X = np.linalg.solve(ATA + alpha * np.eye(A.shape[1]), A.T @ B)  # shape (N, M)
+    # Y = A @ X  # shape (T, M)
+    # Y_mean = Y.mean(axis=0)
+    # B_mean = B.mean(axis=0)
+    # Y_std = Y.std(axis=0, ddof=1)
+    # B_std = B.std(axis=0, ddof=1)
+    # cov = np.sum((Y - Y_mean) * (B - B_mean), axis=0) / (A.shape[0] - 1)
+    # return cov / (Y_std * B_std)
+
+    # Fit the ridge model (no intercept since we only need correlation)
+    n_feats = A.shape[1]
+    model = Ridge(alpha=alpha * n_feats, fit_intercept=False)
+    model.fit(A, B)
+    Y = model.predict(A) # T x N
+    Y_mean = Y.mean(axis=0)
+    B_mean = B.mean(axis=0)
+    Y_centered = Y - Y_mean
+    B_centered = B - B_mean
+    numer = np.sum(Y_centered * B_centered, axis=0)
+    denom = np.sqrt(np.sum(Y_centered**2, axis=0) * np.sum(B_centered**2, axis=0))
+    corr = numer / denom
+    ## correct for subset size
+    # corr *= np.sqrt(A.shape[0] / (A.shape[0] - 2))
+    if return_pvalue:
+        n = A.shape[0]
+        df = n - 2
+        corr_clipped = np.clip(corr, -0.9999999999, 0.9999999999)
+        t_stat = corr_clipped * np.sqrt(df / (1 - corr_clipped**2))
+        pval = 2 * (1 - t.cdf(t_stat, df))
+        return corr, pval
+    else:
+        return corr
+    
+
+def banded_matrix(n, r, m=None):
+    """
+    Create a banded matrix with a band radius of r around the main diagonal
+
+    Args:
+        n (int): Number of rows
+        r (int): Band radius
+        m (int): Number of columns. Defaults to None, in which case m = n
+
+    Returns:
+        np.ndarray: A banded matrix of shape (n, m)
+    """
+    if m is None:
+        m = n
+    a = np.ones((n, m))
+        # Create a mask for elements within the radius r from the main diagonal
+    row_indices = np.arange(n)[:, None]
+    col_indices = np.arange(m)
+    
+    # Calculate the mask to determine which elements should remain as 1
+    mask = np.abs(row_indices - col_indices) <= r
+    
+    # Set elements outside the band radius to zero
+    a[~mask] = 0
+    
+    return a
+
+def hollow_matrix(n, r=1, m=None):
+    """
+    Create a hollow matrix with a band radius of r around the main diagonal
+
+    Args:
+        n (int): Number of rows
+        r (int): Band radius
+        m (int): Number of columns. Defaults to None, in which case m = n
+
+    Returns:
+        np.ndarray: A hollow matrix of shape (n, m)
+    """
+    return 1 - banded_matrix(n, r, m=m)
+
+def batched_diag(x):
+    """
+    Create a batch of diagonal matrices from a matrix of vectors
+
+    Args:
+        x (np.ndarray): A matrix of shape (B, T)
+
+    Returns:
+        np.ndarray: A matrix of shape (B, T, T)
+    """
+    n = x.shape[1]
+    X = np.stack([x] * n)
+    return np.einsum('...ij,...ji->...i', X, np.eye(n))
+
+
+
+def debug_print(i, name="dump.txt"):
+    """
+    Print a debug message to a file on disk. Creates the file if it doesn't exist.
+
+    Args:
+        i (int): The debug message to print
+        name (str): The name of the file to write to
+    """
+    with open(name, "a") as f:
+        f.write(f"{i}\n")

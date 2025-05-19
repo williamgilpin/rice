@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rice"
+version = "0.1"
+description = "Discover causal relationships from time series"
+readme = "README.md"
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = ["numpy", "scipy", "scikit-learn"]
+
+# Optional dependencies
+[project.optional-dependencies]
+benchmarks = ["anndata"]
+tests = ["matplotlib"]
+extra = ["scikit-learn"]
+
+# Package data
+[tool.setuptools]
+packages = ["rice"]
