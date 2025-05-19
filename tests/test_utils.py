@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from hccm.utils import (
+from rice.utils import (
     mask_topk, hankel_matrix, batch_diag, embed_ts, multivariate_embed_ts,
     project_pca, batch_pca, embed_ts_pca, batch_sfa, embed_ts_sfa,
     batch_pearson, batch_spearman, progress_bar, flatten_along_axis,

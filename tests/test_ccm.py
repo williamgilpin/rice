@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 import warnings
-from hccm.ccm import CausalDetection
+from rice.models import CausalDetection
 
 class TestCausalDetection(unittest.TestCase):
     def setUp(self):
