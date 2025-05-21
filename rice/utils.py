@@ -2,6 +2,8 @@
 Utilities for processing and transforming time series datasets, with a particular
 focus on vectorizing over batches of time series.
 
+
+
 """
 
 import numpy as np
@@ -456,6 +458,66 @@ def max_linear_correlation_ridge(A, B, alpha=1e-3, return_pvalue=False):
     else:
         return corr
     
+from scipy.sparse.linalg import cg, LinearOperator
+def approx_ridge_cg(A, b, lambda_reg, rtol=1e-6, atol=1e-8, maxiter=None, use_precond=True):
+    """
+    Solve min_x ||A x - b||^2 + λ||x||^2 approximately via CG,  without forming A^T A 
+    explicitly.
+
+    Args:
+        A (np.ndarray): (T, M) design matrix
+        b (np.ndarray): (T,) target vector
+        lambda_reg (float): Ridge regularization parameter
+        tol (float): CG tolerance
+        maxiter (int): Maximum number of CG iterations
+
+    Returns:
+        x (np.ndarray): (M,) solution vector
+    """
+    M = A.shape[1]
+
+    # Define the linear operator for (AᵀA + λI)
+    def mv(v):
+        return A.T @ (A @ v) + lambda_reg * v
+    linop = LinearOperator((M, M), matvec=mv)
+
+    # Build simple diagonal preconditioner M ≈ (AᵀA + λI)^(-1)
+    M_inv = None
+    if use_precond:
+        # diag_j = ∑ₜ Aₜⱼ² + λ
+        diag = np.einsum('tm,tm->m', A, A) + lambda_reg
+        M_inv = LinearOperator((M, M), matvec=lambda v: v / diag)
+
+    # Solve using CG with both rtol and atol
+    x, info = cg(
+        linop,
+        A.T @ b,
+        rtol=rtol,
+        atol=atol,
+        maxiter=maxiter or M,
+        M=M_inv
+    )
+    if info > 0:
+        raise RuntimeError(f"CG failed to converge after {info} iterations")
+    return x
+
+from scipy.sparse.linalg import lsqr
+def ridge_lsqr(A, b, lambda_reg, tol=1e-8):
+    """
+    Solve min ||A x - b||^2 + λ ||x||^2 via the damped LSQR algorithm.
+
+    Args:
+        A (np.ndarray): (T, M) design matrix
+        b (np.ndarray): (T,) target vector
+        lambda_reg (float): Ridge regularization parameter
+        tol (float): Tolerance for the solution
+
+    Returns:
+        x (np.ndarray): (M,) solution vector
+    """
+    damp = np.sqrt(lambda_reg)
+    sol = lsqr(A, b, damp=damp, atol=tol, btol=tol, iter_lim=A.shape[1])
+    return sol[0]
 
 def banded_matrix(n, r, m=None):
     """
@@ -498,17 +560,36 @@ def hollow_matrix(n, r=1, m=None):
     """
     return 1 - banded_matrix(n, r, m=m)
 
+import time
+import os
 
-def debug_print(i, name="dump.txt"):
+class TimeTracker:
+    def __init__(self):
+        self.last_time = time.perf_counter()
+time_tracker = TimeTracker()
+
+def debug_print(i, name="dump.txt", include_time=True, reset=False):
     """
     Print a debug message to a file on disk. Creates the file if it doesn't exist.
 
     Args:
         i (int): The debug message to print
         name (str): The name of the file to write to
+        include_time (bool): Whether to include the current time in the debug message
+        reset (bool): Whether to reset the file. If True, the file is deleted if it exists.
     """
+    if reset:
+        if os.path.exists(name):
+            os.remove(name)
+
     with open(name, "a") as f:
-        f.write(f"{i}\n")
+        if include_time:
+            current_time = time.perf_counter()
+            elapsed_time = current_time - time_tracker.last_time
+            time_tracker.last_time = current_time
+            f.write(f"{elapsed_time:.3f}s: {i}\n")
+        else:
+            f.write(f"{i}\n")
 
 def unique_dict(dict_list, duplicate_keys):
     """
