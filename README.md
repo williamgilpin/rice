@@ -40,6 +40,7 @@ Check that everything is installed correctly
 + NumPy
 + Scikit-learn
 + SciPy
++ umap-learn
 
 The examples and tests require additional dependencies:
 
