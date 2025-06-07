@@ -41,8 +41,9 @@ Check that everything is installed correctly
 + Scikit-learn
 + SciPy
 
-The examples and demonstrations require additional dependencies:
+The examples and tests require additional dependencies:
 
++ Pytest
 + Scipy
 + Pandas
 + Anndata
