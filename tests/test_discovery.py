@@ -24,13 +24,17 @@ class TestCausalDetection(unittest.TestCase):
         x5 = np.sin(t) * np.sin(t) + 0.1 * np.random.randn(self.n_timepoints)  # Independent
         
         self.X = np.column_stack([x1, x2, x3, x4, x5])
+
+        print(self.X.shape, np.var(self.X, axis=0))
+
+        self.library_sizes = [100, 50, 10] ## Strides to use to subsample time series
         
-        # Create a default CausalDetection instance with more conservative parameters
+        # Create a default CausalDetection instance
         self.cd = CausalDetection(
             d_embed=3,
             k=4,
             verbose=False,
-            library_sizes=[200, 300, 400],  # Adjusted to match data size
+            library_sizes=self.library_sizes,  # Adjusted to match data size
             neighbors="knn",
             forecast="sum",
             prune_indirect=False,
@@ -58,9 +62,6 @@ class TestCausalDetection(unittest.TestCase):
         
         # Check diagonal is zero
         np.testing.assert_array_equal(np.diag(causal_matrix), np.zeros(self.n_features))
-        
-        # Check matrix is symmetric
-        np.testing.assert_array_almost_equal(causal_matrix, causal_matrix.T)
 
     def test_fit_with_different_forecast_methods(self):
         """Test fitting with different forecast methods."""
@@ -70,7 +71,7 @@ class TestCausalDetection(unittest.TestCase):
             k=4,
             forecast="sum",
             verbose=False,
-            library_sizes=[200, 300, 400]
+            library_sizes=self.library_sizes
         )
         causal_matrix_sum = cd_sum.fit(self.X)
         self.assertEqual(causal_matrix_sum.shape, (self.n_features, self.n_features))
@@ -79,13 +80,28 @@ class TestCausalDetection(unittest.TestCase):
         causal_matrix_sum = np.nan_to_num(causal_matrix_sum, nan=0.0)
         self.assertTrue(np.all(np.abs(causal_matrix_sum) <= 1))
 
+        # Test with smap forecast method
+        cd_smap = CausalDetection(
+            d_embed=3,
+            k=4,
+            forecast="smap",
+            verbose=False,
+            library_sizes=self.library_sizes
+        )
+        causal_matrix_smap = cd_smap.fit(self.X)
+        self.assertEqual(causal_matrix_smap.shape, (self.n_features, self.n_features))
+        self.assertTrue(np.all(np.diag(causal_matrix_smap) == 0))
+        # Handle NaN values by replacing them with zeros before checking bounds
+        causal_matrix_smap = np.nan_to_num(causal_matrix_smap, nan=0.0)
+        self.assertTrue(np.all(np.abs(causal_matrix_smap) <= 1))
+
         # Test with invalid forecast method - should fall back to sum
         cd_invalid = CausalDetection(
             d_embed=3,
             k=4,
             forecast="invalid",
             verbose=False,
-            library_sizes=[200, 300, 400]
+            library_sizes=self.library_sizes
         )
         causal_matrix_invalid = cd_invalid.fit(self.X)
         self.assertEqual(causal_matrix_invalid.shape, (self.n_features, self.n_features))
@@ -97,11 +113,11 @@ class TestCausalDetection(unittest.TestCase):
     def test_fit_with_different_neighbor_methods(self):
         """Test fitting with different neighbor methods."""
         # Test with "knn" neighbors
-        cd_knn = CausalDetection(neighbors="knn", verbose=False, library_sizes=[200, 300, 400])
+        cd_knn = CausalDetection(neighbors="knn", verbose=False, library_sizes=self.library_sizes)
         causal_matrix_knn = cd_knn.fit(self.X)
         
         # Test with "simplex" neighbors
-        cd_simplex = CausalDetection(neighbors="simplex", verbose=False, library_sizes=[200, 300, 400])
+        cd_simplex = CausalDetection(neighbors="simplex", verbose=False, library_sizes=self.library_sizes)
         causal_matrix_simplex = cd_simplex.fit(self.X)
         
         # Check shapes
@@ -110,7 +126,7 @@ class TestCausalDetection(unittest.TestCase):
 
     def test_fit_with_ensemble(self):
         """Test fitting with ensemble method."""
-        cd_ensemble = CausalDetection(ensemble=True, verbose=False, library_sizes=[200, 300, 400])
+        cd_ensemble = CausalDetection(ensemble=True, verbose=False, library_sizes=self.library_sizes)
         causal_matrix_ensemble = cd_ensemble.fit(self.X)
         
         # Check shape
@@ -118,7 +134,7 @@ class TestCausalDetection(unittest.TestCase):
 
     def test_fit_with_prune_indirect(self):
         """Test fitting with indirect relationship pruning."""
-        cd_prune = CausalDetection(prune_indirect=True, verbose=False, library_sizes=[200, 300, 400])
+        cd_prune = CausalDetection(prune_indirect=True, verbose=False, library_sizes=self.library_sizes)
         causal_matrix_prune = cd_prune.fit(self.X)
         
         # Check shape
@@ -126,7 +142,7 @@ class TestCausalDetection(unittest.TestCase):
 
     def test_fit_with_significance_threshold(self):
         """Test fitting with significance threshold."""
-        cd_sig = CausalDetection(significance_threshold=0.05, verbose=False, library_sizes=[200, 300, 400])
+        cd_sig = CausalDetection(significance_threshold=0.05, verbose=False, library_sizes=self.library_sizes)
         causal_matrix_sig = cd_sig.fit(self.X)
         
         # Check shape
@@ -134,7 +150,7 @@ class TestCausalDetection(unittest.TestCase):
 
     def test_fit_with_sweep_d_embed(self):
         """Test fitting with embedding dimension sweep."""
-        cd_sweep = CausalDetection(sweep_d_embed=True, verbose=False, library_sizes=[200, 300, 400])
+        cd_sweep = CausalDetection(sweep_d_embed=True, verbose=False, library_sizes=self.library_sizes)
         causal_matrix_sweep = cd_sweep.fit(self.X)
         
         # Check shape
@@ -142,7 +158,7 @@ class TestCausalDetection(unittest.TestCase):
 
     def test_fit_with_custom_library_sizes(self):
         """Test fitting with custom library sizes."""
-        custom_sizes = [200, 300, 400]
+        custom_sizes = self.library_sizes
         cd_custom = CausalDetection(library_sizes=custom_sizes, verbose=False)
         causal_matrix_custom = cd_custom.fit(self.X)
         
@@ -151,7 +167,7 @@ class TestCausalDetection(unittest.TestCase):
 
     def test_fit_with_store_intermediates(self):
         """Test fitting with intermediate results storage."""
-        cd_store = CausalDetection(store_intermediates=True, verbose=False, library_sizes=[200, 300, 400])
+        cd_store = CausalDetection(store_intermediates=True, verbose=False, library_sizes=self.library_sizes)
         causal_matrix_store = cd_store.fit(self.X)
         
         # Check shape

@@ -18,6 +18,7 @@ hccm/data/*
 *plot_results.ipynb
 *GSE110357_htseq_counts_all_v1.csv.gz
 pbmc68k.h5ad
+.DS_Store
 
 # PyTorch checkpoints
 *.pth.tar

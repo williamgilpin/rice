@@ -1,4 +1,5 @@
 import numpy as np
+# import jax.numpy as np
 import warnings
 import os
 
@@ -21,6 +22,7 @@ warnings.filterwarnings("ignore", category=ConvergenceWarning)
 
 relu = lambda x: np.maximum(0, x)
 from umap.umap_ import fuzzy_simplicial_set
+
 def simplex_neighbors(X, metric='euclidean', k=20, tol=1e-6):
     """
     Compute the distance between points in a dataset using the simplex distance metric.
@@ -39,7 +41,6 @@ def simplex_neighbors(X, metric='euclidean', k=20, tol=1e-6):
     tree.fit(X)
     dists, idx  = tree.kneighbors(X)
     dists, idx = dists[:, 1:].T, idx[:, 1:].T
-    debug_print("distances")
     # rhos = dists[0]
     # sigmas = np.array([find_sigma(drow, tol=tol)[0] for drow in dists.T])
     # sigmas += tol # Add a small tolerance to avoid division by zero
@@ -47,7 +48,7 @@ def simplex_neighbors(X, metric='euclidean', k=20, tol=1e-6):
                                                         return_dists=True, 
                                                         knn_indices=idx.T, 
                                                         knn_dists=dists.T)
-    debug_print("solve")
+
     wgts = np.exp(-relu(dists - rhos[None, :]) / sigmas[None, :])
     # dists = -np.log(wgts + tol)
     # return dists, idx
@@ -371,7 +372,6 @@ class CausalDetection:
         # all_y_true = np.zeros((m, m, ntx))
         # print("rt", all_y_pred.shape, all_y_true.shape)
 
-        debug_print(0)
         k = min(ntx - 1, self.k)
         causal_matrix = np.zeros((m, m))
         # I = np.eye(m, dtype=Xe.dtype)[None, :, :]       # shape (M, M), not (B, M, M)
@@ -382,7 +382,6 @@ class CausalDetection:
         # from .utils import approx_ridge_cg, ridge_lsqr
         # from scipy.sparse.linalg import lsqr
         for i in range(m):
-            debug_print("Inside m loop")
             if self.neighbors == "simplex":
                 ## This is the slow step
                 wgts, idx, sig = simplex_neighbors(Xe[i], k=k, tol=tol)
@@ -397,42 +396,34 @@ class CausalDetection:
                 wgts = np.exp(-dists / dmin) # (k, nt) weights of k neighbors for each point
 
             ## Regularized smap often seems to overfit
-            debug_print("Above decision")
             y_target = Y[:, :ntx, 0].copy()
+            # print(y_target.shape, idx.shape, wgts.shape, Xe.shape, Y.shape, flush=True)
+            # (100, 5) (4, 5) (4, 5) 
             if self.forecast == "smap":
-                # print(wgts.shape, idx.shape)
-                # debug_print("Inside Forecast Loop")
 
                 # ## toggle here 
                 Ax = (Xe[:, idx.T, :1] * wgts.T[None, ..., None]).squeeze()  # Input batch matrix (B x T x M)
                 Ay = (Y[:, idx.T] * wgts.T[None, ..., None]).squeeze()  # Input batch matrix (B x T x M)
-                debug_print("Made Ax and Ay")
                 Cx = Xe[:, :idx.shape[1], 0].squeeze().copy()  # Target batch matrix (B x T)
                 # # Cy = Y[:, :idx.shape[1], 0].squeeze().copy() # Not used. Target batch matrix (B x T)
-                debug_print("Made Cx and Cy")
                 
                 # AtA = np.einsum('btm,btn->bmn', Ax, Ax)  ## Compute A^T @ A over batch (B x M x M) --> (B x M x M)
                 # AtC = np.einsum('btm,bt->bm', Ax, Cx)    ## Compute A^T @ C over batch (B x M) --> (B x M)
                 AtA = Ax.transpose(0, 2, 1) @ Ax  # This is equivalent to the first einsum
                 AtC = (Ax.transpose(0, 2, 1) @ Cx[..., None]).squeeze(-1)  # This is equivalent to the second einsum
                 # print(Ax.shape, Ay.shape, Cx.shape, AtA.shape, AtC.shape, flush=True)
-                debug_print("Einsums to AtA and AtC")
-                
+
                 # inverse = np.linalg.inv(AtA + lambda_reg * I)
                 # B_sol = np.einsum('bmn,bm->bn', inverse, AtC)[:, :, None]
                 # B_sol = B_sol.squeeze(-1)  # Final shape (B x M)
-                B_sol = np.linalg.solve(AtA + lambda_reg * I, AtC[:, :, None]).squeeze(-1)
-                debug_print("Solve")
-                
-                # B1, T1, M1 = Ax.shape
-                # B_sol = np.empty((B1, M1), dtype=Ax.dtype)
-                # for i in range(B1):
-                #     B_sol[i] = lsqr(Ax[i], Cx[..., None][i], damp=np.sqrt(lambda_reg), atol=1e-5, btol=1e-5, iter_lim=Ax.shape[1])[0]
 
+                # B_sol = np.linalg.solve(AtA + lambda_reg * I, AtC[:, :, None]).squeeze(-1)
+
+                B_sol = np.zeros((m, k))
+                for j in range(m):
+                    B_sol[j] = np.linalg.solve(AtA[j] + lambda_reg * I, AtC[j][:, None]).squeeze(-1)
+                
                 y_pred = np.einsum('btm,bm->bt', Ay, B_sol) ## Predict Y with the B coeffs fit from X
-                debug_print("Einsum2")
-                # print(y_pred.shape, m, ntx, flush=True)
-                # debug_print("Copy")
                 ## Include all context points
                 # y_pred = flatten_along_axis((Ay * B_sol[:, None]).squeeze(), (0, 2)).T
             else:
@@ -445,7 +436,6 @@ class CausalDetection:
                 y_pred, y_target = np.squeeze(y_pred), np.squeeze(y_target)
                 ## Include all context points
                 # y_pred = flatten_along_axis((Y[:, idx.T] * wgts.T[None, ..., None]).squeeze(), (0, 2)).T
-            debug_print("Finished loop")
             ## Classical CCM
             # rho, pval = batch_pearson(y_pred, y_target, pvalue=True)
             # if self.significance_threshold is not None:
@@ -455,12 +445,10 @@ class CausalDetection:
 
         # For each response, fit a ridge regression model over timepoints
         # To assign a causal score to each upstream gene
-        debug_print("Before scoring loop")
         for i in range(m):
 
             
 
-            debug_print(f"Inside scoring loop {i}")
             # Loop over responses)
             Xd, Yd = all_y_pred[:, i].T,  y_target[i][:, None] # sweep downstreams
             # print(Xd.shape, Yd.shape, flush=True)
@@ -496,8 +484,8 @@ class CausalDetection:
             causal_matrix[:, i] = A.squeeze()
 
         np.fill_diagonal(causal_matrix, 0)
-        debug_print(2)
         return causal_matrix
+
 
 
     def fit(self, X, y=None):
@@ -526,7 +514,6 @@ class CausalDetection:
                 cmat = np.nanmax([cmat, self.fit(X, y)], axis=0)
                 self.sweep_d_embed = True
             return cmat
-        debug_print("start", reset=True)
         if y is None:
             y = X
         
@@ -534,7 +521,7 @@ class CausalDetection:
 
         if self.library_sizes is None:
             if self.max_library_size is None:
-                self.library_sizes = np.arange(1, int(np.floor(self.n  / (self.d_embed + 1))))#[::-1]#[-2:][::-1]
+                self.library_sizes = np.arange(1, int(np.floor(self.n  / (self.d_embed + 1))))[::-1]
                 # self.library_sizes = (2 ** np.arange(0, int(np.floor(np.log2(self.n  / (self.d_embed + 1)))))).astype(int)[::-1]
             else:
                 self.library_sizes = np.unique(np.linspace(1, int(np.floor(self.n  / (self.d_embed + 1))), self.max_library_size).astype(int))[::-1]
@@ -546,7 +533,6 @@ class CausalDetection:
 
         ## Iterate over library sizes to test robustness of causal matrix
         for i, stride in enumerate(self.library_sizes):
-            debug_print(f"striding {i} {stride}", reset=True)
             if self.verbose:
                 progress_bar(i, len(self.library_sizes))
 
@@ -566,26 +552,11 @@ class CausalDetection:
         if self.store_intermediates:
             self.ac = all_causmat.copy()
         
-        ## Kernel still dies
-        ## Downweight non-monotonic scaling with data size
-        debug_print("Correlation test", reset=True)
         traces = np.reshape(all_causmat, (all_causmat.shape[0], -1)).T
         rho_mono, pval_mono = batch_spearman(traces, pvalue=True)
-        debug_print("Correlation test2", reset=True)
         rho_mono = np.reshape(rho_mono, all_causmat.shape[1:])
         pval_mono = np.reshape(pval_mono, all_causmat.shape[1:])
-        debug_print("Correlation test3", reset=True)
         cause_matrix = all_causmat[-1] * np.abs(rho_mono) # Fixed 5/2025
-        debug_print("Correlation test4", reset=True)
-
-        ## Kernel still dies
-        # rho_mono = np.zeros((X.shape[1], X.shape[1]))
-        # for inds in np.ndindex(X.shape[1], X.shape[1]):
-        #     trace = all_causmat[:, *inds]
-        #     baseline = np.argsort(np.argsort(trace, axis=-1), axis=-1).astype(np.float32)
-        #     corr = spearmanr(trace, baseline)
-        #     rho_mono[*inds] = corr[0]
-        # cause_matrix = all_causmat[-1] * rho_mono
 
         ## Prune indirect connections
         if self.prune_indirect:
