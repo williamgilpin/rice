@@ -45,8 +45,9 @@ Check that everything is installed correctly
 + NumPy
 + Scikit-learn
 + SciPy
-+ [umap-learn](https://umap-learn.readthedocs.io/en/latest/)
 + [hnswlib](https://github.com/nmslib/hnswlib)
+<!-- + [umap-learn](https://umap-learn.readthedocs.io/en/latest/) -->
+
 
 The examples and tests require additional dependencies:
 

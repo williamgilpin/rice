@@ -77,23 +77,11 @@ def simplex_neighbors(X, metric='euclidean', k=20, tol=1e-6):
 
     """
 
-    # if X.shape[0] > 100:
-    #     warnings.warn("Large dataset, using hnswlib for neighbors")
     idx, dists = neighbors_hnswlib(X, metric, k)
-    # else:
-    #     tree = NearestNeighbors(n_neighbors=k+1, algorithm='auto', metric=metric, n_jobs=-1)
-    #     tree.fit(X)
-    #     dists, idx  = tree.kneighbors(X)
-
 
     dists, idx = dists[:, 1:].T, idx[:, 1:].T
     
-    # result, sigmas, rhos, dists2 = fuzzy_simplicial_set(X, k, 0, metric, 
-    #                                                     return_dists=True, 
-    #                                                     knn_indices=idx.T, 
-    #                                                     knn_dists=dists.T)
     rhos = dists[0]
-
     sigmas = np.array([find_sigma(drow, tol=tol)[0] for drow in dists.T])
     sigmas += tol # Add a small tolerance to avoid division by zero
 
@@ -101,6 +89,8 @@ def simplex_neighbors(X, metric='euclidean', k=20, tol=1e-6):
 
     wgts = np.exp(-relu(dists - rhos[None, :]) / sigmas[None, :])
     return wgts, idx, sigmas
+
+
 
 def find_sigma(dists, tol=1e-6):
     """
