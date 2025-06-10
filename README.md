@@ -40,7 +40,7 @@ Check that everything is installed correctly
 + NumPy
 + Scikit-learn
 + SciPy
-+ umap-learn
++ [umap-learn](https://umap-learn.readthedocs.io/en/latest/)
 
 The examples and tests require additional dependencies:
 
@@ -52,9 +52,13 @@ The examples and tests require additional dependencies:
 
 ### What do we mean by "Causality"?
 
-Our approach aims to discover "weak" (observational) causality, in the sense of Granger causality but generalized for nonlinear dynamical systems. This form of causality is equivalent a discovering a forcing term in a system of coupled differential equations.
+Our approach aims to discover weak (observational) causality, in the sense of Granger causality but generalized for nonlinear dynamical systems. This form of causality is equivalent a discovering a forcing term in a system of coupled differential equations.
 
-We do not claim to discover "strong" (interventional) causality, in the sense of Pearl's do-calculus, which is impossible without the ability to intervene on the generator (the experimental system).
+We do not discover strong (interventional) causality, in the sense of Pearl's do-calculus, which is impossible without the ability to intervene on the data generator (the experimental system).
+<!-- 
+### References -->
+
+
 
 
 

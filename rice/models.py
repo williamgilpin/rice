@@ -6,6 +6,7 @@ import os
 # from scipy.spatial.distance import cdist
 from sklearn.neighbors import NearestNeighbors
 from scipy.stats import pearsonr, spearmanr
+from scipy.special import betainc
 
 from .utils import embed_ts, multivariate_embed_ts
 from .utils import batch_pearson, batch_spearman, flatten_along_axis
@@ -23,6 +24,43 @@ warnings.filterwarnings("ignore", category=ConvergenceWarning)
 relu = lambda x: np.maximum(0, x)
 from umap.umap_ import fuzzy_simplicial_set
 
+import hnswlib
+def neighbors_hnswlib(X, metric='euclidean', k=20):
+    """
+    Use hnswlib for approximate k-nearest neighbors of each point in a dataset.
+    Returns the indices and distances of the neighbors.
+
+    Args:
+        X (np.ndarray): dataset of shape (n, d)
+        metric (str): distance metric to use
+        k (int): number of nearest neighbors to use in the distance calculation
+
+    Returns:
+        idx (np.ndarray): indices of the neighbors
+        dists (np.ndarray): distances to the neighbors
+    """
+    n, d = X.shape
+    if metric == 'euclidean':
+        metric = 'l2'
+    elif metric == 'cosine':
+        metric = 'angular'
+    else:
+        raise ValueError(f"Metric {metric} not supported")
+
+    # Initialize the HNSW index: space='l2' for Euclidean, 'cosine' for angular distance
+    index = hnswlib.Index(space=metric, dim=d)
+    # Prepare index to hold n elements; tune M and ef_construction as desired
+    index.init_index(max_elements=n, M=16, ef_construction=200)
+    # Add all vectors (cast to float32) with integer labels 0…n−1
+    index.add_items(X.astype(np.float64), np.arange(n))
+    # Set query-time parameter for recall/speed trade-off
+    index.set_ef(50)
+    # Perform k+1 neighbor queries for each point
+    labels, distances = index.knn_query(X.astype(np.float64), k+1)
+    idx = labels      # shape: (n, k+1)
+    dists = distances # shape: (n, k+1)
+    return idx, dists
+
 def simplex_neighbors(X, metric='euclidean', k=20, tol=1e-6):
     """
     Compute the distance between points in a dataset using the simplex distance metric.
@@ -37,19 +75,30 @@ def simplex_neighbors(X, metric='euclidean', k=20, tol=1e-6):
         np.ndarray: distance matrix of shape (n, m)
 
     """
-    tree = NearestNeighbors(n_neighbors=k+1, algorithm='auto', metric=metric, n_jobs=-1)
-    tree.fit(X)
-    dists, idx  = tree.kneighbors(X)
+
+    # tree = NearestNeighbors(n_neighbors=k+1, algorithm='auto', metric=metric, n_jobs=-1)
+    # tree.fit(X)
+    # dists, idx  = tree.kneighbors(X)
+    # print("sklearn idx.shape, dists.shape", idx.shape, dists.shape)
+
+    idx, dists = neighbors_hnswlib(X, metric, k)
+    # print("hnswlib idx.shape, dists.shape", idx.shape, dists.shape)
+    # print("Neighbors computed", flush=True)
+
+
     dists, idx = dists[:, 1:].T, idx[:, 1:].T
     # rhos = dists[0]
     # sigmas = np.array([find_sigma(drow, tol=tol)[0] for drow in dists.T])
     # sigmas += tol # Add a small tolerance to avoid division by zero
+    
     result, sigmas, rhos, dists2 = fuzzy_simplicial_set(X, k, 0, metric, 
                                                         return_dists=True, 
                                                         knn_indices=idx.T, 
                                                         knn_dists=dists.T)
+    # print("Simplex computed", flush=True)
 
     wgts = np.exp(-relu(dists - rhos[None, :]) / sigmas[None, :])
+    # print("Exponentiation complete", flush=True)
     # dists = -np.log(wgts + tol)
     # return dists, idx
     return wgts, idx, sigmas
@@ -361,26 +410,34 @@ class CausalDetection:
 
         Can modify to hold out test
         """
+        # print("a", flush=True)
         m, ntx, d_embed = Xe.shape[0], Xe.shape[1], Xe.shape[2]
         nt = Y.shape[0]
         if len(Y.shape) < 3:
             Y = Y.T[..., None] # (n_genes, nt, 1)
         else:
             Y = Y.T
-        
-        all_y_pred = np.zeros((m, m, ntx))
-        # all_y_true = np.zeros((m, m, ntx))
-        # print("rt", all_y_pred.shape, all_y_true.shape)
+        # print("b", flush=True)
+        # all_y_pred = np.zeros((m, m, ntx))
+        all_y_pred = np.memmap(
+            "temp.npy", 
+            dtype=np.float64, 
+            mode="w+", 
+            shape=(m, m, ntx)
+        )
 
         k = min(ntx - 1, self.k)
         causal_matrix = np.zeros((m, m))
         # I = np.eye(m, dtype=Xe.dtype)[None, :, :]       # shape (M, M), not (B, M, M)
         I = np.eye(k)[None, :, :]
+        # print("c", flush=True)
         lambda_reg = 0.5 * m * 100000 # Scale regularization parameter to the number of features
+
+        
+        # print("d", flush=True)
         ## Outer index runs over causes, which we use for lookups into the downstream
         ## causees. 
-        # from .utils import approx_ridge_cg, ridge_lsqr
-        # from scipy.sparse.linalg import lsqr
+        y_target = Y[:, :ntx, 0].copy()
         for i in range(m):
             if self.neighbors == "simplex":
                 ## This is the slow step
@@ -396,9 +453,6 @@ class CausalDetection:
                 wgts = np.exp(-dists / dmin) # (k, nt) weights of k neighbors for each point
 
             ## Regularized smap often seems to overfit
-            y_target = Y[:, :ntx, 0].copy()
-            # print(y_target.shape, idx.shape, wgts.shape, Xe.shape, Y.shape, flush=True)
-            # (100, 5) (4, 5) (4, 5) 
             if self.forecast == "smap":
 
                 # ## toggle here 
@@ -417,11 +471,11 @@ class CausalDetection:
                 # B_sol = np.einsum('bmn,bm->bn', inverse, AtC)[:, :, None]
                 # B_sol = B_sol.squeeze(-1)  # Final shape (B x M)
 
-                # B_sol = np.linalg.solve(AtA + lambda_reg * I, AtC[:, :, None]).squeeze(-1)
+                B_sol = np.linalg.solve(AtA + lambda_reg * I, AtC[:, :, None]).squeeze(-1)
 
-                B_sol = np.zeros((m, k))
-                for j in range(m):
-                    B_sol[j] = np.linalg.solve(AtA[j] + lambda_reg * I, AtC[j][:, None]).squeeze(-1)
+                # B_sol = np.zeros((m, k))
+                # for j in range(m):
+                #     B_sol[j] = np.linalg.solve(AtA[j] + lambda_reg * I, AtC[j][:, None]).squeeze(-1)
                 
                 y_pred = np.einsum('btm,bm->bt', Ay, B_sol) ## Predict Y with the B coeffs fit from X
                 ## Include all context points
@@ -434,54 +488,98 @@ class CausalDetection:
                 y_pred = np.sum(Y[:, idx.T] * wgts.T[None, ..., None], axis=2)
                 y_target = Y[:, :y_pred.shape[1], :].copy()
                 y_pred, y_target = np.squeeze(y_pred), np.squeeze(y_target)
-                ## Include all context points
-                # y_pred = flatten_along_axis((Y[:, idx.T] * wgts.T[None, ..., None]).squeeze(), (0, 2)).T
-            ## Classical CCM
-            # rho, pval = batch_pearson(y_pred, y_target, pvalue=True)
-            # if self.significance_threshold is not None:
-            #     causal_matrix[pval > self.significance_threshold] = 0
-            # causal_matrix[i] = rho.copy() * (1 - pval)
+
             all_y_pred[i] = y_pred
 
         # For each response, fit a ridge regression model over timepoints
         # To assign a causal score to each upstream gene
-        for i in range(m):
+        ## This might be the bottleneck when stride gets close to 1
+        # for i in range(m):
 
-            
-
-            # Loop over responses)
-            Xd, Yd = all_y_pred[:, i].T,  y_target[i][:, None] # sweep downstreams
-            # print(Xd.shape, Yd.shape, flush=True)
-            # Xd, Yd = all_y_pred[i].T, all_y_true[i][:, None] # sweep upstreams
-            
-            # Xd, Yd = y_pred.copy().T, y_target.copy()[0][:, None]
-
+        #     # Loop over responses
+        #     Xd, Yd = all_y_pred[:, i].T,  y_target[i][:, None] # sweep downstreams
+        #     # Xd, Yd = all_y_pred[i].T, all_y_true[i][:, None] # sweep upstreams
            
-            Xd = (Xd - np.mean(Xd, axis=0, keepdims=True))
-            Yd = (Yd - np.mean(Yd, axis=0, keepdims=True))
+        #     Xd = (Xd - np.mean(Xd, axis=0, keepdims=True))
+        #     Yd = (Yd - np.mean(Yd, axis=0, keepdims=True))
+        #     # print("2", flush=True)
 
-            # lambda_val = 1e0 / Xd.shape[1] * 1e10
-            # ridge = Ridge(alpha=lambda_val, fit_intercept=False)
-            # ridge.fit(Xd, Yd)
-            # Yd_pred = ridge.predict(Xd) # error doesn't distinguish upstream
-            # corr = pearsonr(Yd_pred.squeeze(), Yd.squeeze())
-            # corr = corr[0] * (1 - corr[1])
-            # r2 = corr
-            # A = ridge.coef_.T.squeeze()
-            # A = np.abs(A)
-            # A *= r2
+        #     # lambda_val = 1e0 / Xd.shape[1] * 1e10
+        #     # ridge = Ridge(alpha=lambda_val, fit_intercept=False)
+        #     # ridge.fit(Xd, Yd)
+        #     # Yd_pred = ridge.predict(Xd) # error doesn't distinguish upstream
+        #     # corr = pearsonr(Yd_pred.squeeze(), Yd.squeeze())
+        #     # corr = corr[0] * (1 - corr[1])
+        #     # r2 = corr
+        #     # A = ridge.coef_.T.squeeze()
+        #     # A = np.abs(A)
+        #     # A *= r2
 
-            ## Strong regularization limit
-            A = (Xd.T @ Yd).T
-            Yd_pred = Xd @ A.T
-            corr = pearsonr(Yd_pred.squeeze(), Yd.squeeze())
-            corr = corr[0] * (1 - corr[1])
-            # corr = np.nan_to_num(corr, nan=1.0) # constant time series no variance
-            r2 = corr
-            A = np.abs(A)
-            A *= r2
+        #     ## Strong regularization limit
+        #     A = (Xd.T @ Yd).T
+        #     # print("3", flush=True)
+        #     Yd_pred = Xd @ A.T
+        #     # print("4", flush=True)
+        #     corr = pearsonr(Yd_pred.squeeze(), Yd.squeeze())
+        #     # print("5", flush=True)
+        #     corr = corr[0] * (1 - corr[1])
+        #     # print("6", flush=True)
+        #     # corr = np.nan_to_num(corr, nan=1.0) # constant time series no variance
+        #     r2 = corr 
+        #     # print("7", flush=True)
+        #     A = np.abs(A)
+        #     # print("8", flush=True)
+        #     A *= r2
+        #     # print("9", flush=True)
+        #     causal_matrix[:, i] = A.squeeze()
+        
+        for i in range(m):
+            # --- First pass: compute sums for means, inner products, and Y variance ---
+            n = 0
+            sum_x = np.zeros(m)
+            sum_y = 0.0
+            sum_y2 = 0.0
+            sum_xy = np.zeros(m)
 
-            causal_matrix[:, i] = A.squeeze()
+            for t in range(ntx):
+                x = all_y_pred[:, i, t]       # shape (m,)
+                y = y_target[i][t]            # scalar
+                n += 1
+                sum_x  += x
+                sum_y  += y
+                sum_y2 += y*y
+                sum_xy += x * y
+
+            mu_x = sum_x / n
+            mu_y = sum_y / n
+
+            # centered cross‐product A_j = ∑ₜ (xₜⱼ − μₓⱼ)(yₜ − μᵧ)
+            A = sum_xy - n * mu_x * mu_y
+
+            # centered variance of Y: ∑ₜ (yₜ − μᵧ)²
+            sum_y2c = sum_y2 - n * mu_y**2
+
+            # streaming correlation between predicted and actual Y
+            sum_pred2 = 0.0
+            sum_pred_y = 0.0
+            for t in range(ntx):
+                x = all_y_pred[:, i, t]
+                x_cent = x - mu_x
+                y_cent = y_target[i][t] - mu_y
+                y_pred = np.dot(x_cent, A)
+                sum_pred2  += y_pred**2
+                sum_pred_y += y_pred * y_cent
+
+            # Pearson r between Y_pred and Y, with exact p-value given by the beta distribution
+            r = sum_pred_y / np.sqrt(sum_pred2 * sum_y2c)
+            a = n / 2.0 - 1.0
+            pval = 2 * betainc(a, a, 0.5 * (1 - abs(r)))
+            r2 = r * (1 - pval)
+            causal_matrix[:, i] = np.abs(A) * r2
+
+        ## if temp.npy is on disk, delete it
+        if os.path.exists("temp.npy"):
+            os.remove("temp.npy")
 
         np.fill_diagonal(causal_matrix, 0)
         return causal_matrix
@@ -533,6 +631,8 @@ class CausalDetection:
 
         ## Iterate over library sizes to test robustness of causal matrix
         for i, stride in enumerate(self.library_sizes):
+            
+            # print(len(self.library_sizes), i, stride, flush=True)
             if self.verbose:
                 progress_bar(i, len(self.library_sizes))
 
@@ -547,15 +647,11 @@ class CausalDetection:
                 # all_causmat.append(self.compute_crossmap(Xe[:, ::stride], y[:-(self.d_embed - 1)][::stride]))
                 all_causmat[i] = self.compute_crossmap(Xe[:, ::stride], y[:-(self.d_embed - 1)][::stride])
 
-        # all_causmat = np.array(all_causmat)
-
         if self.store_intermediates:
             self.ac = all_causmat.copy()
-        
-        traces = np.reshape(all_causmat, (all_causmat.shape[0], -1)).T
-        rho_mono, pval_mono = batch_spearman(traces, pvalue=True)
-        rho_mono = np.reshape(rho_mono, all_causmat.shape[1:])
-        pval_mono = np.reshape(pval_mono, all_causmat.shape[1:])
+
+        traces = all_causmat.T
+        rho_mono, pval_mono = batch_spearman(traces, pvalue=True) # fails here when batch dimension is too large
         cause_matrix = all_causmat[-1] * np.abs(rho_mono) # Fixed 5/2025
 
         ## Prune indirect connections

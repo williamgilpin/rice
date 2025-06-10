@@ -5,10 +5,20 @@ focus on vectorizing over batches of time series.
 
 
 """
-
+import warnings
 import numpy as np
-
 from scipy.linalg import hankel
+
+try:
+    from numba import njit, prange
+    numba_flag = True
+except:
+    numba_flag = False
+    warnings.warn("Numba is not installed, some functions will be slower.")
+
+if not numba_flag:
+    njit = lambda x: x
+    prange = lambda x: range(x)
 
 def mask_topk(arr, k=1):
     """
@@ -308,37 +318,185 @@ def embed_ts_sfa(X, m=10, scaled=False):
 
 
 from scipy.stats import t as t_dist
-def batch_pearson(x, y=None, pvalue=False):
+# def batch_pearson(x, y=None, pvalue=False):
+#     """
+#     Calculate the Pearson correlation between two sets of time series along the 
+#     last axis
+    
+#     Args:
+#         x (ndarray): A tensor of shape (batch, N, M)
+#         y (ndarray): A tensor of shape (batch, N, M). If None, the sorted values of the 
+#             x time series are used and the Pearson correlation is calculated
+#             relative to these sorted values
+#         pvalue (bool): Whether to return the p-value of the correlation
+    
+#     Returns:
+#         corr (ndarray): A tensor of shape (batch, N) containing the Pearson correlation
+#             between each pair of time series
+#     """
+#     M = x.shape[-1]
+#     corr = np.empty(x.shape[:-1], dtype=np.float64)
+#     if pvalue:
+#         pval = np.empty(x.shape[:-1], dtype=np.float64)
+#     for i in np.ndindex(x.shape[:-1]):
+#         xb = x[*i]
+#         yb = y[*i] if y is not None else np.sort(xb, axis=-1)
+#         # compute sums per series (shape: N)
+#         sx  = xb.sum(axis=-1)
+#         sy  = yb.sum(axis=-1)
+#         sxx = (xb * xb).sum(axis=-1)
+#         syy = (yb * yb).sum(axis=-1)
+#         sxy = (xb * yb).sum(axis=-1)
+#         # covariance and variances
+#         cov = sxy - (sx * sy) / M
+#         vx  = sxx - (sx * sx) / M
+#         vy  = syy - (sy * sy) / M
+#         r   = cov / np.sqrt(vx * vy)
+#         corr[*i] = r
+#         if pvalue:
+#             t_stat      = r * np.sqrt((M - 2) / (1e-6 + 1 - r**2))
+#             pval[*i]     = 2 * t_dist.sf(np.abs(t_stat), df=M - 2)
+#     return (corr, pval) if pvalue else corr
+
+
+import numpy as np
+from scipy.stats import t as t_dist
+
+def batch_pearson_memmap(dtype, shape, y_path=None,
+                         mode='r', chunk_size=10_000_000, pvalue=False, eps=1e-8):
     """
-    Calculate the Pearson correlation between two sets of time series along the 
-    last axis
-    
+    Memory-mapped, chunk-wise Pearson correlation along the last axis.
+
     Args:
-        x (ndarray): A tensor of shape (batch, N, M)
-        y (ndarray): A tensor of shape (batch, N, M). If None, the sorted values of the 
-            x time series are used and the Pearson correlation is calculated
-            relative to these sorted values
-        pvalue (bool): Whether to return the p-value of the correlation
-    
+        dtype: data type of x
+        shape (tuple): full shape of x
+        y_path (str, optional): filename of .npy for y; if None, uses sorted(x)
+        mode (str): numpy.memmap mode
+        chunk_size (int): max elements to load per chunk
+        pvalue (bool): if True, also return two-tailed p-value
+        eps (float): stabilizer to avoid zero-division
+
     Returns:
-        corr (ndarray): A tensor of shape (batch, N) containing the Pearson correlation
-            between each pair of time series
+        corr (ndarray[...,]) or (corr, pvalue)
+    """
+    # open x (and y) as memmaps
+    x = np.memmap("temp_pearson.npy", dtype=dtype, mode=mode, shape=shape)
+    if y_path is None:
+        # if sorting required, do it in‐place in small blocks
+        y = np.empty_like(x)
+        # sort each slice along last axis chunk-wise
+        for idx in np.ndindex(*shape[:-1]):
+            y[idx] = np.sort(x[idx], axis=-1)
+    else:
+        y = np.memmap(y_path, dtype=dtype, mode=mode, shape=shape)
+
+    n = shape[-1]
+    out_shape = shape[:-1]
+    sum_x  = np.zeros(out_shape, np.float64)
+    sum_y  = np.zeros(out_shape, np.float64)
+    sum_x2 = np.zeros(out_shape, np.float64)
+    sum_y2 = np.zeros(out_shape, np.float64)
+    sum_xy = np.zeros(out_shape, np.float64)
+
+    # process in chunks along the last axis
+    for start in range(0, n, chunk_size):
+        stop = min(start + chunk_size, n)
+        xs = x[..., start:stop]
+        ys = y[..., start:stop]
+
+        sum_x  += xs.sum(axis=-1)
+        sum_y  += ys.sum(axis=-1)
+        sum_x2 += np.einsum('...i,...i->...', xs, xs)
+        sum_y2 += np.einsum('...i,...i->...', ys, ys)
+        sum_xy += np.einsum('...i,...i->...', xs, ys)
+
+    cov   = sum_xy - sum_x * sum_y / n
+    var_x = sum_x2  - sum_x**2  / n
+    var_y = sum_y2  - sum_y**2  / n
+
+    denom = np.sqrt(var_x * var_y) + eps
+    corr = cov / denom
+
+    if pvalue:
+        t_stat = corr * np.sqrt((n - 2) / (1 - corr**2 + eps))
+        p      = 2 * t_dist.sf(np.abs(t_stat), df=n - 2)
+        return corr, p
+
+    return corr
+
+def batch_pearson(x, y=None, pvalue=False, eps=1e-8):
+    """
+    Memory-efficient Pearson correlation along the last axis.
+
+    Args:
+        x (ndarray[..., M]): input tensor
+        y (ndarray[..., M], optional): second tensor; if None, uses sorted(x)
+        pvalue (bool): if True, also return two-tailed p-value
+        eps (float): small constant to avoid division by zero
+
+    Returns:
+        corr (ndarray[...]): Pearson r
+        (optional) p (ndarray[...]): two-tailed p-value
     """
     if y is None:
+        # unavoidable O(...×M) cost of sorting, but no additional copy for centering
         y = np.sort(x, axis=-1)
-    xc = x.copy() - np.mean(x, axis=-1, keepdims=True)
-    yc = y.copy() - np.mean(y, axis=-1, keepdims=True)
-    corr = np.sum(xc * yc, axis=-1) / np.sqrt(np.sum(xc ** 2, axis=-1) * np.sum(yc ** 2, axis=-1))
-    # corr = np.nan_to_num(corr, nan=0.0)
+
+    n = x.shape[-1]
+
+    # compute sums and sums of squares without full-array temporaries
+    sum_x  = np.sum(x,  axis=-1)
+    sum_y  = np.sum(y,  axis=-1)
+    sum_x2 = np.einsum('...i,...i->...', x, x)
+    sum_y2 = np.einsum('...i,...i->...', y, y)
+    sum_xy = np.einsum('...i,...i->...', x, y)
+
+    # covariance and variances
+    cov   = sum_xy - sum_x * sum_y / n
+    var_x = sum_x2  - sum_x**2  / n
+    var_y = sum_y2  - sum_y**2  / n
+
+    # Pearson r
+    denom = np.sqrt(var_x * var_y) + eps
+    corr = cov / denom
+
     if pvalue:
-        n = x.shape[-1]
-        t_stat = corr * np.sqrt((n - 2) / (1e-6 + 1 - corr ** 2))
-        # except:
-        #     print(corr, n, flush=True)
-        #     t_stat = corr * np.sqrt((n - 2) / (1e-2 + 1 - corr ** 2))
-        p_value = 2 * t_dist.sf(np.abs(t_stat), df=n-2)
-        return corr, p_value
+        # Student’s t for Pearson r
+        t_stat = corr * np.sqrt((n - 2) / (1 - corr**2 + eps))
+        p = 2 * t_dist.sf(np.abs(t_stat), df=n - 2)
+        return corr, p
+
     return corr
+
+# from scipy.stats import t as t_dist
+# def batch_pearson(x, y=None, pvalue=False):
+#     """
+#     Calculate the Pearson correlation between two sets of time series along the 
+#     last axis
+    
+#     Args:
+#         x (ndarray): A tensor of shape (..., M)
+#         y (ndarray): A tensor of shape (..., M). If None, the sorted values of the 
+#             x time series are used and the Pearson correlation is calculated
+#             relative to these sorted values
+#         pvalue (bool): Whether to return the p-value of the correlation
+    
+#     Returns:
+#         corr (ndarray): A tensor of shape (..., N) containing the Pearson correlation
+#             between each pair of datasets contracted along the last axis
+#     """
+#     if y is None:
+#         y = np.sort(x, axis=-1)
+#     xc = x.copy() - np.mean(x, axis=-1, keepdims=True)
+#     yc = y.copy() - np.mean(y, axis=-1, keepdims=True)
+#     corr = np.sum(xc * yc, axis=-1) / np.sqrt(np.sum(xc ** 2, axis=-1) * np.sum(yc ** 2, axis=-1))
+#     # corr = np.nan_to_num(corr, nan=0.0)
+#     if pvalue:
+#         n = x.shape[-1]
+#         t_stat = corr * np.sqrt((n - 2) / (1e-6 + 1 - corr ** 2))
+#         p_value = 2 * t_dist.sf(np.abs(t_stat), df=n-2)
+#         return corr, p_value
+#     return corr
 
 def batch_spearman(x, y=None, pvalue=False):
     """
