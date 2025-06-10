@@ -9,6 +9,7 @@ The Riemannian Causal Embedding (RiCE) algorithm discovers causal relationships 
 ```python
     from rice import CausalDetection
     from rice.examples import ecoli100
+    from rice.metrics import compute_metrics
 
     # Load example time series dataset and ground truth connectivity matrix
     X, adj_true = ecoli100() # shapes (300 timepoints x 100 genes) and (100 genes x 100 genes)
@@ -16,8 +17,12 @@ The Riemannian Causal Embedding (RiCE) algorithm discovers causal relationships 
     # Run causal analysis and get predicted causal graph
     model = CausalDetection()
     adj_pred = model.fit_transform(X) # shape (100 genes x 100 genes)
-```
 
+    # Score the predicted graph
+    scores = compute_metrics(adj_true, adj_pred)
+    print(scores["AUPRC Multiplier"]) # AUPRC Multiplier > 32.0
+    print(scores["ROC-AUC Multiplier"]) # ROC-AUC Multiplier > 1.0
+```
 
 ### Installation
 
