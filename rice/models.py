@@ -77,31 +77,29 @@ def simplex_neighbors(X, metric='euclidean', k=20, tol=1e-6):
 
     """
 
-    # tree = NearestNeighbors(n_neighbors=k+1, algorithm='auto', metric=metric, n_jobs=-1)
-    # tree.fit(X)
-    # dists, idx  = tree.kneighbors(X)
-    # print("sklearn idx.shape, dists.shape", idx.shape, dists.shape)
-
+    # if X.shape[0] > 100:
+    #     warnings.warn("Large dataset, using hnswlib for neighbors")
     idx, dists = neighbors_hnswlib(X, metric, k)
-    # print("hnswlib idx.shape, dists.shape", idx.shape, dists.shape)
-    # print("Neighbors computed", flush=True)
+    # else:
+    #     tree = NearestNeighbors(n_neighbors=k+1, algorithm='auto', metric=metric, n_jobs=-1)
+    #     tree.fit(X)
+    #     dists, idx  = tree.kneighbors(X)
 
 
     dists, idx = dists[:, 1:].T, idx[:, 1:].T
-    # rhos = dists[0]
-    # sigmas = np.array([find_sigma(drow, tol=tol)[0] for drow in dists.T])
-    # sigmas += tol # Add a small tolerance to avoid division by zero
     
-    result, sigmas, rhos, dists2 = fuzzy_simplicial_set(X, k, 0, metric, 
-                                                        return_dists=True, 
-                                                        knn_indices=idx.T, 
-                                                        knn_dists=dists.T)
-    # print("Simplex computed", flush=True)
+    # result, sigmas, rhos, dists2 = fuzzy_simplicial_set(X, k, 0, metric, 
+    #                                                     return_dists=True, 
+    #                                                     knn_indices=idx.T, 
+    #                                                     knn_dists=dists.T)
+    rhos = dists[0]
+
+    sigmas = np.array([find_sigma(drow, tol=tol)[0] for drow in dists.T])
+    sigmas += tol # Add a small tolerance to avoid division by zero
+
+    # sigmas, dists_transformed = compute_sigmas_vectorized(dists, tol=1e-6)
 
     wgts = np.exp(-relu(dists - rhos[None, :]) / sigmas[None, :])
-    # print("Exponentiation complete", flush=True)
-    # dists = -np.log(wgts + tol)
-    # return dists, idx
     return wgts, idx, sigmas
 
 def find_sigma(dists, tol=1e-6):
@@ -122,6 +120,38 @@ def find_sigma(dists, tol=1e-6):
     jac = lambda sig: sum(np.exp(-relu(dists - rho) / (sig + tol)) * relu(dists - rho)) / (sig + tol)**2
     sigma = fsolve(func, rho, fprime=jac, xtol=tol)[0]
     dists_transformed = np.exp(-relu(dists - rho) / (sigma + tol))
+    return sigma, dists_transformed
+
+def compute_sigmas_vectorized(dists, tol=1e-6, max_iter=50, jac_eps=1e-6):
+    """
+    Vectorized Newton's method to solve for sigma for each column of the distance matrix.
+
+    Args:
+        dists (np.ndarray): shape (k, n_points)
+        tol (float): convergence tolerance
+        max_iter (int): maximum iterations
+
+    Returns:
+        sigmas (np.ndarray): shape (n_points,)
+        dists_transformed (np.ndarray): shape (k, n_points)
+    """
+    k, n = dists.shape
+    rho = np.min(dists, axis=0)                 # (n,)
+    D = np.maximum(dists - rho, 0.0) + tol                # (k, n)
+    sigma = rho.copy()                              # initial guess
+
+    for _ in range(max_iter):
+        denom = sigma + tol                         # guaranteed ≥ tol
+        E = np.exp(-D / denom)                      # (k, n)
+        f = E.sum(axis=0) - np.log2(k)              # (n,)
+        if np.all(np.abs(f) < tol):
+            break
+        jac = (E * D).sum(axis=0) / (denom**2)      # (n,)
+        jac_safe = np.maximum(jac, jac_eps)         # avoid zero
+        sigma -= f / jac_safe                       # Newton update
+        sigma = np.maximum(sigma, tol)              # enforce σ ≥ tol
+
+    dists_transformed = np.exp(-D / (sigma + tol))
     return sigma, dists_transformed
 
 
@@ -474,14 +504,10 @@ class CausalDetection:
                 # B_sol = B_sol.squeeze(-1)  # Final shape (B x M)
 
                 B_sol = np.linalg.solve(AtA + lambda_reg * I, AtC[:, :, None]).squeeze(-1)
-
-                # B_sol = np.zeros((m, k))
-                # for j in range(m):
-                #     B_sol[j] = np.linalg.solve(AtA[j] + lambda_reg * I, AtC[j][:, None]).squeeze(-1)
-                
                 y_pred = np.einsum('btm,bm->bt', Ay, B_sol) ## Predict Y with the B coeffs fit from X
                 ## Include all context points
                 # y_pred = flatten_along_axis((Ay * B_sol[:, None]).squeeze(), (0, 2)).T
+
             else:
                 if self.forecast != "sum":
                     warnings.warn("Forecast type not recognized, falling back to sum over neighbors")
@@ -627,34 +653,30 @@ class CausalDetection:
                 self.library_sizes = np.unique(np.linspace(1, int(np.floor(self.n  / (self.d_embed + 1))), self.max_library_size).astype(int))[::-1]
         ## check that library sizes increase monotonically
         if not np.all(np.diff(self.library_sizes) <= 0):
-            warnings.warn("Stride sizes must decrease monotonically, otherwise the model will not converge. Sorting library sizes.")
+            warnings.warn("Stride sizes must decrease monotonically. Sorting library sizes.")
             self.library_sizes = np.sort(self.library_sizes)[::-1]
         all_causmat = np.zeros((len(self.library_sizes), X.shape[1], X.shape[1]))
 
         ## Iterate over library sizes to test robustness of causal matrix
         for i, stride in enumerate(self.library_sizes):
             
-            # print(len(self.library_sizes), i, stride, flush=True)
             if self.verbose:
                 progress_bar(i, len(self.library_sizes))
 
             if self.ensemble:
                 Xe = embed_ts(X, m=self.d_embed)
-                # all_causmat.append(self.compute_crossmap_ensemble(Xe[:, ::stride], y[:-(self.d_embed - 1)][::stride]))
                 all_causmat[i] = self.compute_crossmap_ensemble(Xe[:, ::stride], y[:-(self.d_embed - 1)][::stride])
 
             else:
-                # Xe = embed_ts_pca(X, m=self.d_embed, scaled=True)
                 Xe = embed_ts(X, m=self.d_embed)
-                # all_causmat.append(self.compute_crossmap(Xe[:, ::stride], y[:-(self.d_embed - 1)][::stride]))
                 all_causmat[i] = self.compute_crossmap(Xe[:, ::stride], y[:-(self.d_embed - 1)][::stride])
 
         if self.store_intermediates:
             self.ac = all_causmat.copy()
 
         traces = all_causmat.T
-        rho_mono, pval_mono = batch_spearman(traces, pvalue=True) # fails here when batch dimension is too large
-        cause_matrix = all_causmat[-1] * np.abs(rho_mono) # Fixed 5/2025
+        rho_mono = batch_spearman(traces, pvalue=False) # Memory error when batch dimension is too large
+        cause_matrix = all_causmat[-1] * np.abs(rho_mono) # Fixed 5/2025, reverted 6/10/2025
 
         ## Prune indirect connections
         if self.prune_indirect:

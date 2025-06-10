@@ -2,23 +2,21 @@
 Utilities for processing and transforming time series datasets, with a particular
 focus on vectorizing over batches of time series.
 
-
-
 """
 import warnings
 import numpy as np
 from scipy.linalg import hankel
 
-try:
-    from numba import njit, prange
-    numba_flag = True
-except:
-    numba_flag = False
-    warnings.warn("Numba is not installed, some functions will be slower.")
+# try:
+#     from numba import njit, prange
+#     numba_flag = True
+# except:
+#     numba_flag = False
+#     warnings.warn("Numba is not installed, some functions will be slower.")
 
-if not numba_flag:
-    njit = lambda x: x
-    prange = lambda x: range(x)
+# if not numba_flag:
+#     njit = lambda x: x
+#     prange = lambda x: range(x)
 
 def mask_topk(arr, k=1):
     """
@@ -316,52 +314,7 @@ def embed_ts_sfa(X, m=10, scaled=False):
         # Xe_sfa = Xe_sfa @ scale_factors
     return Xe_sfa
 
-
 from scipy.stats import t as t_dist
-# def batch_pearson(x, y=None, pvalue=False):
-#     """
-#     Calculate the Pearson correlation between two sets of time series along the 
-#     last axis
-    
-#     Args:
-#         x (ndarray): A tensor of shape (batch, N, M)
-#         y (ndarray): A tensor of shape (batch, N, M). If None, the sorted values of the 
-#             x time series are used and the Pearson correlation is calculated
-#             relative to these sorted values
-#         pvalue (bool): Whether to return the p-value of the correlation
-    
-#     Returns:
-#         corr (ndarray): A tensor of shape (batch, N) containing the Pearson correlation
-#             between each pair of time series
-#     """
-#     M = x.shape[-1]
-#     corr = np.empty(x.shape[:-1], dtype=np.float64)
-#     if pvalue:
-#         pval = np.empty(x.shape[:-1], dtype=np.float64)
-#     for i in np.ndindex(x.shape[:-1]):
-#         xb = x[*i]
-#         yb = y[*i] if y is not None else np.sort(xb, axis=-1)
-#         # compute sums per series (shape: N)
-#         sx  = xb.sum(axis=-1)
-#         sy  = yb.sum(axis=-1)
-#         sxx = (xb * xb).sum(axis=-1)
-#         syy = (yb * yb).sum(axis=-1)
-#         sxy = (xb * yb).sum(axis=-1)
-#         # covariance and variances
-#         cov = sxy - (sx * sy) / M
-#         vx  = sxx - (sx * sx) / M
-#         vy  = syy - (sy * sy) / M
-#         r   = cov / np.sqrt(vx * vy)
-#         corr[*i] = r
-#         if pvalue:
-#             t_stat      = r * np.sqrt((M - 2) / (1e-6 + 1 - r**2))
-#             pval[*i]     = 2 * t_dist.sf(np.abs(t_stat), df=M - 2)
-#     return (corr, pval) if pvalue else corr
-
-
-import numpy as np
-from scipy.stats import t as t_dist
-
 def batch_pearson_memmap(dtype, shape, y_path=None,
                          mode='r', chunk_size=10_000_000, pvalue=False, eps=1e-8):
     """
@@ -424,6 +377,7 @@ def batch_pearson_memmap(dtype, shape, y_path=None,
 
     return corr
 
+from scipy.stats import t as t_dist
 def batch_pearson(x, y=None, pvalue=False, eps=1e-8):
     """
     Memory-efficient Pearson correlation along the last axis.
@@ -592,7 +546,7 @@ def max_linear_correlation_ridge(A, B, alpha=1e-3, return_pvalue=False):
     # cov = np.sum((Y - Y_mean) * (B - B_mean), axis=0) / (A.shape[0] - 1)
     # return cov / (Y_std * B_std)
 
-    # Fit the ridge model (no intercept since we only need correlation)
+    # Fit the ridge model (no intercept needed for correlation)
     n_feats = A.shape[1]
     model = Ridge(alpha=alpha * n_feats, fit_intercept=False)
     model.fit(A, B)
