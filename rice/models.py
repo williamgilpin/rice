@@ -2,6 +2,7 @@ import numpy as np
 # import jax.numpy as np
 import warnings
 import os
+import uuid
 
 # from scipy.spatial.distance import cdist
 from sklearn.neighbors import NearestNeighbors
@@ -50,11 +51,11 @@ def neighbors_hnswlib(X, metric='euclidean', k=20):
     # Initialize the HNSW index: space='l2' for Euclidean, 'cosine' for angular distance
     index = hnswlib.Index(space=metric, dim=d)
     # Prepare index to hold n elements; tune M and ef_construction as desired
-    index.init_index(max_elements=n, M=16, ef_construction=200)
+    index.init_index(max_elements=n, M=12, ef_construction=200)
     # Add all vectors (cast to float32) with integer labels 0…n−1
     index.add_items(X.astype(np.float64), np.arange(n))
     # Set query-time parameter for recall/speed trade-off
-    index.set_ef(50)
+    # index.set_ef(200)
     # Perform k+1 neighbor queries for each point
     labels, distances = index.knn_query(X.astype(np.float64), k+1)
     idx = labels      # shape: (n, k+1)
@@ -419,8 +420,9 @@ class CausalDetection:
             Y = Y.T
         # print("b", flush=True)
         # all_y_pred = np.zeros((m, m, ntx))
+        hash_id = uuid.uuid4().hex
         all_y_pred = np.memmap(
-            "temp.npy", 
+            f"temp_{hash_id}.npy", 
             dtype=np.float64, 
             mode="w+", 
             shape=(m, m, ntx)
@@ -577,9 +579,9 @@ class CausalDetection:
             r2 = r * (1 - pval)
             causal_matrix[:, i] = np.abs(A) * r2
 
-        ## if temp.npy is on disk, delete it
-        if os.path.exists("temp.npy"):
-            os.remove("temp.npy")
+        ## if temp_hashid.npy is on disk, delete it
+        if os.path.exists(f"temp_{hash_id}.npy"):
+            os.remove(f"temp_{hash_id}.npy")
 
         np.fill_diagonal(causal_matrix, 0)
         return causal_matrix
