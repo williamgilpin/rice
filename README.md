@@ -9,6 +9,7 @@ The Riemannian Causal Embedding (RiCE) algorithm discovers causal relationships 
 ```python
     from rice import CausalDetection
     from rice.examples import ecoli100
+    from rice.metrics import compute_metrics
 
     # Load example time series dataset and ground truth connectivity matrix
     X, adj_true = ecoli100() # shapes (300 timepoints x 100 genes) and (100 genes x 100 genes)
@@ -16,8 +17,12 @@ The Riemannian Causal Embedding (RiCE) algorithm discovers causal relationships 
     # Run causal analysis and get predicted causal graph
     model = CausalDetection()
     adj_pred = model.fit_transform(X) # shape (100 genes x 100 genes)
-```
 
+    # Score the predicted graph
+    scores = compute_metrics(adj_true, adj_pred)
+    print(scores["AUPRC Multiplier"]) # AUPRC Multiplier > 32.0
+    print(scores["ROC-AUC Multiplier"]) # ROC-AUC Multiplier > 1.0
+```
 
 ### Installation
 
@@ -40,7 +45,9 @@ Check that everything is installed correctly
 + NumPy
 + Scikit-learn
 + SciPy
-+ umap-learn
++ [hnswlib](https://github.com/nmslib/hnswlib)
+<!-- + [umap-learn](https://umap-learn.readthedocs.io/en/latest/) -->
+
 
 The examples and tests require additional dependencies:
 
@@ -52,9 +59,13 @@ The examples and tests require additional dependencies:
 
 ### What do we mean by "Causality"?
 
-Our approach aims to discover "weak" (observational) causality, in the sense of Granger causality but generalized for nonlinear dynamical systems. This form of causality is equivalent a discovering a forcing term in a system of coupled differential equations.
+Our approach aims to discover weak (observational) causality, in the sense of Granger causality but generalized for nonlinear dynamical systems. This form of causality is equivalent a discovering a forcing term in a system of coupled differential equations.
 
-We do not claim to discover "strong" (interventional) causality, in the sense of Pearl's do-calculus, which is impossible without the ability to intervene on the generator (the experimental system).
+We do not discover strong (interventional) causality, in the sense of Pearl's do-calculus, which is impossible without the ability to intervene on the data generator (the experimental system).
+<!-- 
+### References -->
+
+
 
 
 

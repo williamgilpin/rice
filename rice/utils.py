@@ -2,13 +2,21 @@
 Utilities for processing and transforming time series datasets, with a particular
 focus on vectorizing over batches of time series.
 
-
-
 """
-
+import warnings
 import numpy as np
-
 from scipy.linalg import hankel
+
+# try:
+#     from numba import njit, prange
+#     numba_flag = True
+# except:
+#     numba_flag = False
+#     warnings.warn("Numba is not installed, some functions will be slower.")
+
+# if not numba_flag:
+#     njit = lambda x: x
+#     prange = lambda x: range(x)
 
 def mask_topk(arr, k=1):
     """
@@ -306,39 +314,143 @@ def embed_ts_sfa(X, m=10, scaled=False):
         # Xe_sfa = Xe_sfa @ scale_factors
     return Xe_sfa
 
+from scipy.stats import t as t_dist
+def batch_pearson_memmap(dtype, shape, y_path=None,
+                         mode='r', chunk_size=10_000_000, pvalue=False, eps=1e-8):
+    """
+    Memory-mapped, chunk-wise Pearson correlation along the last axis.
+
+    Args:
+        dtype: data type of x
+        shape (tuple): full shape of x
+        y_path (str, optional): filename of .npy for y; if None, uses sorted(x)
+        mode (str): numpy.memmap mode
+        chunk_size (int): max elements to load per chunk
+        pvalue (bool): if True, also return two-tailed p-value
+        eps (float): stabilizer to avoid zero-division
+
+    Returns:
+        corr (ndarray[...,]) or (corr, pvalue)
+    """
+    # open x (and y) as memmaps
+    x = np.memmap("temp_pearson.npy", dtype=dtype, mode=mode, shape=shape)
+    if y_path is None:
+        # if sorting required, do it in‐place in small blocks
+        y = np.empty_like(x)
+        # sort each slice along last axis chunk-wise
+        for idx in np.ndindex(*shape[:-1]):
+            y[idx] = np.sort(x[idx], axis=-1)
+    else:
+        y = np.memmap(y_path, dtype=dtype, mode=mode, shape=shape)
+
+    n = shape[-1]
+    out_shape = shape[:-1]
+    sum_x  = np.zeros(out_shape, np.float64)
+    sum_y  = np.zeros(out_shape, np.float64)
+    sum_x2 = np.zeros(out_shape, np.float64)
+    sum_y2 = np.zeros(out_shape, np.float64)
+    sum_xy = np.zeros(out_shape, np.float64)
+
+    # process in chunks along the last axis
+    for start in range(0, n, chunk_size):
+        stop = min(start + chunk_size, n)
+        xs = x[..., start:stop]
+        ys = y[..., start:stop]
+
+        sum_x  += xs.sum(axis=-1)
+        sum_y  += ys.sum(axis=-1)
+        sum_x2 += np.einsum('...i,...i->...', xs, xs)
+        sum_y2 += np.einsum('...i,...i->...', ys, ys)
+        sum_xy += np.einsum('...i,...i->...', xs, ys)
+
+    cov   = sum_xy - sum_x * sum_y / n
+    var_x = sum_x2  - sum_x**2  / n
+    var_y = sum_y2  - sum_y**2  / n
+
+    denom = np.sqrt(var_x * var_y) + eps
+    corr = cov / denom
+
+    if pvalue:
+        t_stat = corr * np.sqrt((n - 2) / (1 - corr**2 + eps))
+        p      = 2 * t_dist.sf(np.abs(t_stat), df=n - 2)
+        return corr, p
+
+    return corr
 
 from scipy.stats import t as t_dist
-def batch_pearson(x, y=None, pvalue=False):
+def batch_pearson(x, y=None, pvalue=False, eps=1e-8):
     """
-    Calculate the Pearson correlation between two sets of time series along the 
-    last axis
-    
+    Memory-efficient Pearson correlation along the last axis.
+
     Args:
-        x (ndarray): A tensor of shape (batch, N, M)
-        y (ndarray): A tensor of shape (batch, N, M). If None, the sorted values of the 
-            x time series are used and the Pearson correlation is calculated
-            relative to these sorted values
-        pvalue (bool): Whether to return the p-value of the correlation
-    
+        x (ndarray[..., M]): input tensor
+        y (ndarray[..., M], optional): second tensor; if None, uses sorted(x)
+        pvalue (bool): if True, also return two-tailed p-value
+        eps (float): small constant to avoid division by zero
+
     Returns:
-        corr (ndarray): A tensor of shape (batch, N) containing the Pearson correlation
-            between each pair of time series
+        corr (ndarray[...]): Pearson r
+        (optional) p (ndarray[...]): two-tailed p-value
     """
     if y is None:
+        # unavoidable O(...×M) cost of sorting, but no additional copy for centering
         y = np.sort(x, axis=-1)
-    xc = x.copy() - np.mean(x, axis=-1, keepdims=True)
-    yc = y.copy() - np.mean(y, axis=-1, keepdims=True)
-    corr = np.sum(xc * yc, axis=-1) / np.sqrt(np.sum(xc ** 2, axis=-1) * np.sum(yc ** 2, axis=-1))
-    # corr = np.nan_to_num(corr, nan=0.0)
+
+    n = x.shape[-1]
+
+    # compute sums and sums of squares without full-array temporaries
+    sum_x  = np.sum(x,  axis=-1)
+    sum_y  = np.sum(y,  axis=-1)
+    sum_x2 = np.einsum('...i,...i->...', x, x)
+    sum_y2 = np.einsum('...i,...i->...', y, y)
+    sum_xy = np.einsum('...i,...i->...', x, y)
+
+    # covariance and variances
+    cov   = sum_xy - sum_x * sum_y / n
+    var_x = sum_x2  - sum_x**2  / n
+    var_y = sum_y2  - sum_y**2  / n
+
+    # Pearson r
+    denom = np.sqrt(var_x * var_y) + eps
+    corr = cov / denom
+
     if pvalue:
-        n = x.shape[-1]
-        t_stat = corr * np.sqrt((n - 2) / (1e-6 + 1 - corr ** 2))
-        # except:
-        #     print(corr, n, flush=True)
-        #     t_stat = corr * np.sqrt((n - 2) / (1e-2 + 1 - corr ** 2))
-        p_value = 2 * t_dist.sf(np.abs(t_stat), df=n-2)
-        return corr, p_value
+        # Student’s t for Pearson r
+        t_stat = corr * np.sqrt((n - 2) / (1 - corr**2 + eps))
+        p = 2 * t_dist.sf(np.abs(t_stat), df=n - 2)
+        return corr, p
+
     return corr
+
+# from scipy.stats import t as t_dist
+# def batch_pearson(x, y=None, pvalue=False):
+#     """
+#     Calculate the Pearson correlation between two sets of time series along the 
+#     last axis
+    
+#     Args:
+#         x (ndarray): A tensor of shape (..., M)
+#         y (ndarray): A tensor of shape (..., M). If None, the sorted values of the 
+#             x time series are used and the Pearson correlation is calculated
+#             relative to these sorted values
+#         pvalue (bool): Whether to return the p-value of the correlation
+    
+#     Returns:
+#         corr (ndarray): A tensor of shape (..., N) containing the Pearson correlation
+#             between each pair of datasets contracted along the last axis
+#     """
+#     if y is None:
+#         y = np.sort(x, axis=-1)
+#     xc = x.copy() - np.mean(x, axis=-1, keepdims=True)
+#     yc = y.copy() - np.mean(y, axis=-1, keepdims=True)
+#     corr = np.sum(xc * yc, axis=-1) / np.sqrt(np.sum(xc ** 2, axis=-1) * np.sum(yc ** 2, axis=-1))
+#     # corr = np.nan_to_num(corr, nan=0.0)
+#     if pvalue:
+#         n = x.shape[-1]
+#         t_stat = corr * np.sqrt((n - 2) / (1e-6 + 1 - corr ** 2))
+#         p_value = 2 * t_dist.sf(np.abs(t_stat), df=n-2)
+#         return corr, p_value
+#     return corr
 
 def batch_spearman(x, y=None, pvalue=False):
     """
@@ -434,7 +546,7 @@ def max_linear_correlation_ridge(A, B, alpha=1e-3, return_pvalue=False):
     # cov = np.sum((Y - Y_mean) * (B - B_mean), axis=0) / (A.shape[0] - 1)
     # return cov / (Y_std * B_std)
 
-    # Fit the ridge model (no intercept since we only need correlation)
+    # Fit the ridge model (no intercept needed for correlation)
     n_feats = A.shape[1]
     model = Ridge(alpha=alpha * n_feats, fit_intercept=False)
     model.fit(A, B)
@@ -617,3 +729,86 @@ def unique_dict(dict_list, duplicate_keys):
             unique_dicts.append(d)
             
     return unique_dicts
+
+
+
+class StreamingCorrelation:
+    """
+    Compute the Pearson correlation between each entry of a streaming
+    M x M array and a known monotonic function g(i) in one pass.
+
+    Parameters:
+        M (int): Spatial dimension of each frame (frames are M×M).
+        g_func (callable): Monotonic function g(i) of the time index i (0-based or 1-based).
+        dtype (data-type): Numeric type for accumulators.
+        tol (float): Tolerance for the solution.
+    
+    While this yields Pearson, for a strictly increasing g the
+    Pearson trend coefficient often closely tracks Spearman's rho.
+
+    Example:
+        >>> model = StreamingCorrelation(100, lambda i: i)
+        >>> for i in range(1000):
+        >>>     model.update(np.random.normal(size=(100, 100)))
+        >>> rho = model.finalize()
+        >>> print(rho) # (100, 100) array of Pearson trend correlations
+    """
+
+    def __init__(self, M, g_func=None, dtype=np.float64, tol=1e-10):
+        self.M = M
+        self.g = g_func
+        # accumulators for sums
+        self.Sx = np.zeros((M, M), dtype=dtype)
+        self.Sxx = np.zeros((M, M), dtype=dtype)
+        self.Sxg = np.zeros((M, M), dtype=dtype)
+        # scalar sums for g
+        self.g_sum = 0.0
+        self.g2_sum = 0.0
+        self.n = 0
+        self.tol = tol
+
+    def update(self, frame):
+        """
+        Incorporate the next M×M frame.
+
+        Args:
+            frame (np.ndarray, shape (M, M)): Next observation in the time series.
+        """
+        i = self.n
+        # gi = self.g(i)
+        gi = i # Assume a linear trend
+        self.n += 1
+
+        # update spatial sums
+        self.Sx += frame
+        self.Sxx += frame * frame
+        self.Sxg += frame * gi
+
+        # update scalar sums
+        self.g_sum += gi
+        self.g2_sum += gi * gi
+
+    def finalize(self):
+        """
+        Compute the per-pixel correlation matrix.
+
+        Returns: 
+            rho (np.ndarray, shape (M, M)): Pearson trend correlation with g; 
+            for strictly increasing g, often a good proxy for Spearman rho.
+        """
+        if self.n < 2:
+            raise ValueError("Need at least two frames to compute correlation.")
+
+        # covariance numerator
+        num = self.Sxg - (self.Sx * (self.g_sum / self.n))
+
+        # variance denominators
+        var_x = self.Sxx - (self.Sx * self.Sx) / self.n
+        var_g = self.g2_sum - (self.g_sum * self.g_sum) / self.n
+        den = np.sqrt(var_x * var_g)
+        pearson = num / (den + self.tol)
+
+        ## Convert to Spearman via the Gaussian relation assuming bivariate normal
+        spearman = (6 / np.pi) * np.arcsin(pearson / 2)
+
+        return spearman
