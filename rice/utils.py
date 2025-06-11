@@ -729,3 +729,86 @@ def unique_dict(dict_list, duplicate_keys):
             unique_dicts.append(d)
             
     return unique_dicts
+
+
+
+class StreamingCorrelation:
+    """
+    Compute the Pearson correlation between each entry of a streaming
+    M x M array and a known monotonic function g(i) in one pass.
+
+    Parameters:
+        M (int): Spatial dimension of each frame (frames are M×M).
+        g_func (callable): Monotonic function g(i) of the time index i (0-based or 1-based).
+        dtype (data-type): Numeric type for accumulators.
+        tol (float): Tolerance for the solution.
+    
+    While this yields Pearson, for a strictly increasing g the
+    Pearson trend coefficient often closely tracks Spearman's rho.
+
+    Example:
+        >>> model = StreamingCorrelation(100, lambda i: i)
+        >>> for i in range(1000):
+        >>>     model.update(np.random.normal(size=(100, 100)))
+        >>> rho = model.finalize()
+        >>> print(rho) # (100, 100) array of Pearson trend correlations
+    """
+
+    def __init__(self, M, g_func=None, dtype=np.float64, tol=1e-10):
+        self.M = M
+        self.g = g_func
+        # accumulators for sums
+        self.Sx = np.zeros((M, M), dtype=dtype)
+        self.Sxx = np.zeros((M, M), dtype=dtype)
+        self.Sxg = np.zeros((M, M), dtype=dtype)
+        # scalar sums for g
+        self.g_sum = 0.0
+        self.g2_sum = 0.0
+        self.n = 0
+        self.tol = tol
+
+    def update(self, frame):
+        """
+        Incorporate the next M×M frame.
+
+        Args:
+            frame (np.ndarray, shape (M, M)): Next observation in the time series.
+        """
+        i = self.n
+        # gi = self.g(i)
+        gi = i # Assume a linear trend
+        self.n += 1
+
+        # update spatial sums
+        self.Sx += frame
+        self.Sxx += frame * frame
+        self.Sxg += frame * gi
+
+        # update scalar sums
+        self.g_sum += gi
+        self.g2_sum += gi * gi
+
+    def finalize(self):
+        """
+        Compute the per-pixel correlation matrix.
+
+        Returns: 
+            rho (np.ndarray, shape (M, M)): Pearson trend correlation with g; 
+            for strictly increasing g, often a good proxy for Spearman rho.
+        """
+        if self.n < 2:
+            raise ValueError("Need at least two frames to compute correlation.")
+
+        # covariance numerator
+        num = self.Sxg - (self.Sx * (self.g_sum / self.n))
+
+        # variance denominators
+        var_x = self.Sxx - (self.Sx * self.Sx) / self.n
+        var_g = self.g2_sum - (self.g_sum * self.g_sum) / self.n
+        den = np.sqrt(var_x * var_g)
+        pearson = num / (den + self.tol)
+
+        ## Convert to Spearman via the Gaussian relation assuming bivariate normal
+        spearman = (6 / np.pi) * np.arcsin(pearson / 2)
+
+        return spearman

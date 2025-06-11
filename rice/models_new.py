@@ -10,7 +10,7 @@ from scipy.stats import pearsonr, spearmanr
 from scipy.special import betainc
 
 from .utils import embed_ts, multivariate_embed_ts
-from .utils import batch_pearson, batch_spearman, flatten_along_axis, StreamingCorrelation
+from .utils import batch_pearson, batch_spearman, flatten_along_axis
 from .utils import progress_bar, debug_print
 from .utils import hollow_matrix, banded_matrix, max_linear_correlation_ridge
 
@@ -53,15 +53,15 @@ def neighbors_hnswlib(X, metric='euclidean', k=20):
     # Prepare index to hold n elements; tune M and ef_construction as desired
     index.init_index(max_elements=n, M=12, ef_construction=200)
     # Add all vectors (cast to float32) with integer labels 0…n−1
-    index.add_items(X, np.arange(n))
+    index.add_items(X.astype(np.float64), np.arange(n))
     # Set query-time parameter for recall/speed trade-off
     # index.set_ef(200)
     # Perform k+1 neighbor queries for each point
-    idx, dists = index.knn_query(X, k+1) # Both are (n, k+1)
+    idx, dists = index.knn_query(X.astype(np.float64), k+1) # Both are (n, k+1)
     return idx, dists
 
 
-def simplex_neighbors(X, metric='euclidean', k=20, tol=1e-6):
+def simplex_neighbors(dists, idx, metric='euclidean', k=20, tol=1e-6):
     """
     Compute the distance between points in a dataset using the simplex distance metric.
 
@@ -76,8 +76,7 @@ def simplex_neighbors(X, metric='euclidean', k=20, tol=1e-6):
 
     """
 
-    idx, dists = neighbors_hnswlib(X, metric, k)
-
+    # idx, dists = neighbors_hnswlib(X, metric, k)
     dists, idx = dists[:, 1:].T, idx[:, 1:].T
     
     rhos = dists[0]
@@ -110,6 +109,7 @@ def find_sigma(dists, tol=1e-6):
     sigma = fsolve(func, rho, fprime=jac, xtol=tol)[0]
     dists_transformed = np.exp(-relu(dists - rho) / (sigma + tol))
     return sigma, dists_transformed
+
 
 def compute_sigmas_vectorized(dists, tol=1e-6, max_iter=50, jac_eps=1e-6):
     """
@@ -350,7 +350,8 @@ class CausalDetection:
         ## causees. 
         for i in range(m):
             if self.neighbors == "simplex":
-                wgts, idx, sig = simplex_neighbors(Xe[i], k=min(ntx - 1, self.k), tol=tol)
+                idx, dists = self.tree.knn_query(Xe[i].astype(np.float64), min(ntx - 1, self.k)+1)
+                wgts, idx, sig = simplex_neighbors(dists, idx, k=min(ntx - 1, self.k), tol=tol)
             else:
                 if self.neighbors != "knn":
                     warnings.warn("Neighbor type not recognized, falling back to K nearest neighbors")
@@ -440,9 +441,8 @@ class CausalDetection:
         # print("b", flush=True)
         # all_y_pred = np.zeros((m, m, ntx))
         hash_id = uuid.uuid4().hex
-        fname = f"temp_{hash_id}.npy"
         all_y_pred = np.memmap(
-            fname, 
+            f"temp_{hash_id}.npy", 
             dtype=np.float64, 
             mode="w+", 
             shape=(m, m, ntx)
@@ -454,7 +454,6 @@ class CausalDetection:
         I = np.eye(k)[None, :, :]
         # print("c", flush=True)
         lambda_reg = 0.5 * m * 100000 # Scale regularization parameter to the number of features
-
         
         # print("d", flush=True)
         ## Outer index runs over causes, which we use for lookups into the downstream
@@ -463,7 +462,8 @@ class CausalDetection:
         for i in range(m):
             if self.neighbors == "simplex":
                 ## This is the slow step
-                wgts, idx, sig = simplex_neighbors(Xe[i], k=k, tol=tol)
+                idx, dists = self.trees[i].knn_query(Xe[i].astype(np.float64), min(ntx - 1, self.k)+1)
+                wgts, idx, sig = simplex_neighbors(dists, idx, k=min(ntx - 1, self.k), tol=tol)
             else:
                 if self.neighbors != "knn":
                     warnings.warn("Neighbor type not recognized, falling back to K nearest neighbors")
@@ -477,11 +477,10 @@ class CausalDetection:
             ## Regularized smap often seems to overfit
             if self.forecast == "smap":
 
-                # ## toggle here 
                 Ax = (Xe[:, idx.T, :1] * wgts.T[None, ..., None]).squeeze()  # Input batch matrix (B x T x M)
                 Ay = (Y[:, idx.T] * wgts.T[None, ..., None]).squeeze()  # Input batch matrix (B x T x M)
                 Cx = Xe[:, :idx.shape[1], 0].squeeze().copy()  # Target batch matrix (B x T)
-                # # Cy = Y[:, :idx.shape[1], 0].squeeze().copy() # Not used. Target batch matrix (B x T)
+                # Cy = Y[:, :idx.shape[1], 0].squeeze().copy() # Not used. Target batch matrix (B x T)
                 
                 # AtA = np.einsum('btm,btn->bmn', Ax, Ax)  ## Compute A^T @ A over batch (B x M x M) --> (B x M x M)
                 # AtC = np.einsum('btm,bt->bm', Ax, Cx)    ## Compute A^T @ C over batch (B x M) --> (B x M)
@@ -509,48 +508,6 @@ class CausalDetection:
 
             all_y_pred[i] = y_pred
 
-        # For each response, fit a ridge regression model over timepoints
-        # To assign a causal score to each upstream gene
-        ## This might be the bottleneck when stride gets close to 1
-        # for i in range(m):
-
-        #     # Loop over responses
-        #     Xd, Yd = all_y_pred[:, i].T,  y_target[i][:, None] # sweep downstreams
-        #     # Xd, Yd = all_y_pred[i].T, all_y_true[i][:, None] # sweep upstreams
-           
-        #     Xd = (Xd - np.mean(Xd, axis=0, keepdims=True))
-        #     Yd = (Yd - np.mean(Yd, axis=0, keepdims=True))
-        #     # print("2", flush=True)
-
-        #     # lambda_val = 1e0 / Xd.shape[1] * 1e10
-        #     # ridge = Ridge(alpha=lambda_val, fit_intercept=False)
-        #     # ridge.fit(Xd, Yd)
-        #     # Yd_pred = ridge.predict(Xd) # error doesn't distinguish upstream
-        #     # corr = pearsonr(Yd_pred.squeeze(), Yd.squeeze())
-        #     # corr = corr[0] * (1 - corr[1])
-        #     # r2 = corr
-        #     # A = ridge.coef_.T.squeeze()
-        #     # A = np.abs(A)
-        #     # A *= r2
-
-        #     ## Strong regularization limit
-        #     A = (Xd.T @ Yd).T
-        #     # print("3", flush=True)
-        #     Yd_pred = Xd @ A.T
-        #     # print("4", flush=True)
-        #     corr = pearsonr(Yd_pred.squeeze(), Yd.squeeze())
-        #     # print("5", flush=True)
-        #     corr = corr[0] * (1 - corr[1])
-        #     # print("6", flush=True)
-        #     # corr = np.nan_to_num(corr, nan=1.0) # constant time series no variance
-        #     r2 = corr 
-        #     # print("7", flush=True)
-        #     A = np.abs(A)
-        #     # print("8", flush=True)
-        #     A *= r2
-        #     # print("9", flush=True)
-        #     causal_matrix[:, i] = A.squeeze()
-        
         for i in range(m):
             # --- First pass: compute sums for means, inner products, and Y variance ---
             n = 0
@@ -596,8 +553,8 @@ class CausalDetection:
             causal_matrix[:, i] = np.abs(A) * r2
 
         ## if temp_hashid.npy is on disk, delete it
-        if os.path.exists(fname):
-            os.remove(fname)
+        if os.path.exists(f"temp_{hash_id}.npy"):
+            os.remove(f"temp_{hash_id}.npy")
 
         np.fill_diagonal(causal_matrix, 0)
         return causal_matrix
@@ -637,11 +594,8 @@ class CausalDetection:
 
         if self.library_sizes is None:
             if self.max_library_size is None:
-                # self.library_sizes = np.arange(1, int(np.floor(self.n  / (self.d_embed + 1))))[::-1]
-                base_stride = 1.5
-                self.library_sizes = np.unique((base_stride ** np.arange(0, int(np.floor(np.log(self.n  / (self.d_embed + 1))/np.log(base_stride))))).astype(int))[::-1]
-                #self.library_sizes = (2 ** np.arange(0, int(np.floor(np.log2(self.n  / (self.d_embed + 1)))))).astype(int)[::-1]
-                # self.library_sizes = np.unique(np.floor(self.n // np.linspace(1, 2, 50)).astype(int))
+                self.library_sizes = np.arange(1, int(np.floor(self.n  / (self.d_embed + 1))))[::-1]
+                # self.library_sizes = (2 ** np.arange(0, int(np.floor(np.log2(self.n  / (self.d_embed + 1)))))).astype(int)[::-1]
             else:
                 self.library_sizes = np.unique(np.linspace(1, int(np.floor(self.n  / (self.d_embed + 1))), self.max_library_size).astype(int))[::-1]
         ## check that library sizes increase monotonically
@@ -650,28 +604,36 @@ class CausalDetection:
             self.library_sizes = np.sort(self.library_sizes)[::-1]
         all_causmat = np.zeros((len(self.library_sizes), X.shape[1], X.shape[1]))
 
+        self.library_sizes = np.sort(self.library_sizes)
+
+        ## Build search trees for each feature
+        self.trees = [hnswlib.Index(space="l2", dim=self.d_embed) for _ in range(X.shape[1])]
+
         ## Iterate over library sizes to test robustness of causal matrix
+        for tree in self.trees:
+            tree.init_index(max_elements=X.shape[0] - self.d_embed + 1, M=12, ef_construction=200)
+
         Xe = embed_ts(X, m=self.d_embed)
-        # corr_stream = StreamingCorrelation(X.shape[1], lambda i: i)
         for i, stride in enumerate(self.library_sizes):
+
+            ## Insert strided embeddings into the index, along with the true indices
+            for j in range(Xe.shape[0]):
+                self.trees[j].add_items(Xe[j, ::stride], np.arange(Xe.shape[1])[::stride])
             
             if self.verbose:
                 progress_bar(i, len(self.library_sizes))
-            
+
             if self.ensemble:
                 all_causmat[i] = self.compute_crossmap_ensemble(Xe[:, ::stride], y[:-(self.d_embed - 1)][::stride])
             else:
                 all_causmat[i] = self.compute_crossmap(Xe[:, ::stride], y[:-(self.d_embed - 1)][::stride])
 
-            # corr_stream.update(all_causmat[i])
-
         if self.store_intermediates:
             self.ac = all_causmat.copy()
 
-        rho_mono = batch_spearman(all_causmat.T, pvalue=False) # Memory error when batch dimension is too large
-        # rho_mono = corr_stream.finalize()
-        np.fill_diagonal(rho_mono, 0)
-        cause_matrix = all_causmat[-1] * np.abs(rho_mono)
+        traces = all_causmat.T
+        rho_mono = batch_spearman(traces, pvalue=False) # Memory error when batch dimension is too large
+        cause_matrix = all_causmat[-1] * np.abs(rho_mono) # Fixed 5/2025, reverted 6/10/2025
 
         ## Prune indirect connections
         if self.prune_indirect:
