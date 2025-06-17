@@ -270,11 +270,11 @@ class CausalDetection:
             to None, in which case the number of library sizes equals the number of 
             timepoints
         store_intermediates (bool): Whether to store intermediate results
-        neighbors (str): Type of neighbors to use for cross-mapping. Defaults to classic
-            'knn' for K nearest neighbors, while 'simplex' uses fuzzy simplicial set
-            neighbors, which take longer but are more accurate  
+        neighbors (str): Type of neighbors to use for cross-mapping. Defaults to "simplex"
+            which uses fuzzy simplicial set neighbors, which take longer but are more accurate  
+            than classic 'knn' for K nearest neighbors.
         forecast (str): Type of forecast to use for cross-mapping, either "sum" or "smap".
-            Defaults to "sum"
+            Defaults to "smap"
         prune_indirect (bool): Whether to prune indirect relationships due to causal
             transitivity. This helps reduce false positives. Defaults to False
         ensemble (bool): Whether to use ensemble-level cross-mapping. Defaults to False
@@ -284,17 +284,17 @@ class CausalDetection:
     """
     def __init__(
             self, 
-            d_embed=10, 
+            d_embed=3, 
             k=None,
             verbose=True, 
             library_sizes=None, 
             max_library_size=None,
             store_intermediates=False, 
-            neighbors="knn", 
-            forecast="sum",
+            neighbors="simplex", 
+            forecast="smap",
             return_features=False,
             prune_indirect=False,
-            ensemble=False,
+            ensemble=True,
             significance_threshold=None,
             sweep_d_embed=False
         ):
