@@ -58,7 +58,9 @@ The examples and tests require additional dependencies:
 
 To install and run the benchmarks, see the instructions in the [BENCHMARKS.md](../dygene/benchmarks/BENCHMARKS.md) file. Briefy, yhe benchmarks are run by executing the following command in the `dygene/benchmarks` directory
 
+```bash
     python run_benchmarks.py --dataset <dataset_name> --method <method_name>
+```
 
 Where `<dataset_name>` is one of the six benchmark datasets: `dream4`, `twist`, `smoketest`, `beeline`, `mccalla`, `kuramoto` while `<method_name>` refers to any combination of the 30 benchmark methods currently supported. These include classical methods like ARACNE, CLR, GENIE3, modern statistical-learning methods like DEEPSEM, RegDiff, and dynamics-based methods like CCM or SWING-RF.
 
