@@ -377,6 +377,26 @@ def batch_pearson_memmap(dtype, shape, y_path=None,
 
     return corr
 
+def indices_to_adjacency(indices, nval=None):
+    """
+    Convert a list of indices to an adjacency matrix
+
+    Args:
+        indices (array): List of indices
+        nval (int): Number of nodes in the graph
+
+    Returns:
+        array: Adjacency matrix
+    """
+    if nval is None:
+        nval = np.max(indices) + 1
+    assert nval < 1000, "Too many nodes to convert to adjacency matrix"
+
+    amat = np.zeros((nval, nval))
+    for i, j in indices:
+        amat[i, j] = 1
+    return amat
+
 from scipy.stats import t as t_dist
 def batch_pearson(x, y=None, pvalue=False, eps=1e-8):
     """

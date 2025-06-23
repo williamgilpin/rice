@@ -1,0 +1,76 @@
+Metadata-Version: 2.1
+Name: GReNaDIne
+Version: 0.1.16
+Summary: Data-Driven Gene Regulatory Network Inference
+Home-page: 
+Author: Sergio Peignier, Pauline Schmitt, Matis Zouari, Yann Meunier, Timothée Frouté
+Author-email: sergio.peignier@insa-lyon.fr
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: GNU General Public License (GPL)
+Classifier: Operating System :: OS Independent
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: pandas
+Requires-Dist: numpy
+Requires-Dist: scikit-learn
+Requires-Dist: tqdm
+Requires-Dist: scipy
+Requires-Dist: yellowbrick
+Requires-Dist: networkx
+
+# GReNaDIne: Gene Regulatory Network Data-driven Inference
+
+<div style="display: flex; justify-content: center;">
+ <img src="logo.png" height="250">
+</div>
+
+This Python 3.7 package allows to infer Gene Regulatory Networks through several
+Data-driven methods. Pre-processing and evaluation methods are also included.
+
+### Dependencies
+
++ `pip install numpy` version 1.16.2
++ `pip install pandas` version 0.24.2
++ `pip install matplotlib` version 3.0.3
++ `pip install joblib` version 0.13.2
++ `pip install Cython` version 0.29.6
++ `pip install scikit-learn` version 0.20.3
++ `pip install networkx`
++ `pip install seaborn`
++ `pip install pot` version 0.5.1
+POT is not included in the automatic dependencies install
+You have to install it if you want to use columns_matrix_OT_norm() normalization function.
+The other functions of the package do not need POT.
++ `pip install rpy2` version 3.0.2
+rpy2 is not included in the automatic dependencies install
+You have to install it if you want to use DEseq2() normalization function.
+The other functions of the package do not need rpy2.
+
+### Installation:
+
+`pip install GReNaDIne`
+
+### Docker Image
+
+`docker run speignier/grenadine`
+
+### Documentation:
+
+[grenadine.readthedocs.io](https://grenadine.readthedocs.io/en/latest/)
+
+### Tutorials:
+
+Check the jupyter notebook tutorials located in the __tutorial__ folder
++ `Infer_dream5_E_coli_GRN_using_GENIE3.ipynb` to infer GRNs using the GENIE3 method (random forest regression)
++ `Infer_dream5_E_coli_GRN_using_SVMs.ipynb` to infer GRNs using the SVM method (SVM classification)
+
+### Authors:
+
+For bug reports and feedback do not hesitate to contact the authors
+
++ Sergio Peignier: sergio.peignier AT insa-lyon.fr
++ Pauline Schmitt: pauline.schmitt AT insa-lyon.fr
+
+### Maintainer:
+
++ Sergio Peignier: sergio.peignier AT insa-lyon.fr

@@ -1,0 +1,5 @@
+name: oldenv
+channels:
+dependencies:
+
+prefix: "/Users/william/mamba/envs/oldenv"
