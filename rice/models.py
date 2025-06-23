@@ -23,7 +23,7 @@ warnings.filterwarnings('ignore', message='Forecast type not recognized')
 warnings.filterwarnings("ignore", category=ConvergenceWarning)
 
 relu = lambda x: np.maximum(0, x)
-from umap.umap_ import fuzzy_simplicial_set
+# from umap.umap_ import fuzzy_simplicial_set
 
 import hnswlib
 def neighbors_hnswlib(X, metric='euclidean', k=20):
@@ -668,6 +668,9 @@ class CausalDetection:
         if self.store_intermediates:
             self.ac = all_causmat.copy()
 
+        # batch_spearman(np.random.randn(X.shape[1], X.shape[1], len(self.library_sizes)), pvalue=False)
+
+        # rho_mono = batch_pearson(all_causmat.T, pvalue=False) # Memory error when batch dimension is too large    
         rho_mono = batch_spearman(all_causmat.T, pvalue=False) # Memory error when batch dimension is too large
         # rho_mono = corr_stream.finalize()
         np.fill_diagonal(rho_mono, 0)

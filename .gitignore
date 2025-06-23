@@ -19,6 +19,9 @@ hccm/data/*
 *GSE110357_htseq_counts_all_v1.csv.gz
 pbmc68k.h5ad
 .DS_Store
+*result_logs/*
+*benchmarks/benchmark_output*
+*benchmarks/dump*
 
 # PyTorch checkpoints
 *.pth.tar
