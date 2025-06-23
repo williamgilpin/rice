@@ -32,7 +32,44 @@ Where `<dataset_name>` is one of the following:
 + `mccalla` is the McCalla dataset, a set of developmental single-cell RNA-seq datasets with pseudotime
 + `kuramoto` is the Kuramoto dataset, a physical nonlinear dynamical system with a known interaction network
 
-The output will be saved in the `benchmark_output` directory. Each benchmark will produce a separate output file. The output files will be named according to the benchmark name, the dataset name, and the condition. Replicates of the same experiment will be saved in the same file.
+The output will be saved in the `benchmark_output` directory. Each benchmark will produce a separate output file. The output files will be named according to the benchmark name, the dataset name, and the condition. Replicates of the same experiment will be saved in the same file. 
+
+The currently supported options for `<method_name>` are:
+
++ `ensemble_prune` is the full ensemble RiCEmethod with pruning
++ `ensemble_noprune` is the full ensemble RiCE method without pruning
++ `isolated_noprune` is the isolated RiCE method without pruning
++ `ccm` is the cross-mapping method
++ `smap` is the S-map method
++ `regdiffusion` is the diffusion regression method
++ `deepsem` 
++ `swing` is the SWING method with random forest models
++ `wcorr` is simple partial correlations
++ `scode` is the SCODE method
++ `mi` uses mutual information
++ `clr` 
++ `puc`
++ `pidc`
++ `dyngenie3` 
++ `grenadine_clr` is an alternative implementation of CLR in the GReNaDIne library
++ `grenadine_genie3` is an alternative implementation of GENIE3 in the GReNaDIne library
++ `bayesian_ridge` uses Bayesian ridge regression
++ `svr` uses support vector regression
++ `tigress` 
++ `elastica` uses ElasticNet regression
++ `adaboost`
++ `grnboost2`
++ `xgenie3`
++ `wasserstein_gren` is the Wasserstein distance calculation
++ `energy` is the energy distance
++ `wilcoxon` is the Wilcoxon distance
++ `glasso` is the Graphical Lasso method
++ `genie3` 
++ `sincerities`
++ `aracne`
+
+
+
 
 
 ### Attribution
