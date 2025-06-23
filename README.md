@@ -60,15 +60,7 @@ To install and run the benchmarks, see the instructions in the [BENCHMARKS.md](.
 
     python run_benchmarks.py --dataset <dataset_name> --method <method_name>
 
-Where `<dataset_name>` is one of the following:
-+ `dream4` is the DREAM4 dataset
-+ `twist` is the TWIST dataset, a modified version of DREAM4 with intrinsic nonlinear dynamics
-+ `smoketest` is the Smoketest dataset, a trivial dataset with simple correlation structure of varying amplitude
-+ `beeline` is the BEELINE dataset, a set of developmental single-cell RNA-seq datasets with pseudotime
-+ `mccalla` is the McCalla dataset, a set of developmental single-cell RNA-seq datasets with pseudotime
-+ `kuramoto` is the Kuramoto dataset, a physical nonlinear dynamical system with a known interaction network
-
-and `<method_name>` refers to one of the 30 benchmark methods currently supported.
+Where `<dataset_name>` is one of the six benchmark datasets: `dream4`, `twist`, `smoketest`, `beeline`, `mccalla`, `kuramoto` while `<method_name>` refers to any combination of the 30 benchmark methods currently supported. These include classical methods like ARACNE, CLR, GENIE3, modern statistical-learning methods like DEEPSEM, RegDiff, and dynamics-based methods like CCM or SWING-RF.
 
 ### What do we mean by "Causality"?
 
