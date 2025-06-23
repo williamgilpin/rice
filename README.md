@@ -55,7 +55,7 @@ The examples and tests require additional dependencies:
 
 ### Benchmarks
 
-To install and run the benchmarks, see the instructions in the [BENCHMARKS.md](../dygene/benchmarks/BENCHMARKS.md) file. Briefy, yhe benchmarks are run by executing the following command in the `dygene/benchmarks` directory
+To install and run the benchmarks, see the instructions in the [BENCHMARKS.md](./benchmarks/BENCHMARKS.md) file. Briefy, yhe benchmarks are run by executing the following command in the `benchmarks` directory
 
 ```bash
     python run_benchmarks.py --dataset <dataset_name> --method <method_name>
