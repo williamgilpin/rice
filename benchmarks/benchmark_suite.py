@@ -269,7 +269,6 @@ def run_benchmark_model(item, output_fname, DREAM4_flag=False, nval=None, save_m
         if name == "swing":
             from run_swing import run_swing
             if DREAM4_flag:
-                nval = None
                 def fit_model(X):
                     return run_swing(X)
                 if nval == 10:
