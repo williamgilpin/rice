@@ -49,7 +49,6 @@ Check that everything is installed correctly
 
 The examples and tests require additional dependencies:
 
-+ Pytest
 + Scipy
 + Pandas
 + Anndata
