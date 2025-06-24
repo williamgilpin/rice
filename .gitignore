@@ -25,6 +25,8 @@ pbmc68k.h5ad
 *benchmarks/dump*
 *benchmarks/benchmark_outputs*
 temp*
+*benchmark_datasets/*
+*benchmarks/benchmark_datasets/*
 
 # PyTorch checkpoints
 *.pth.tar

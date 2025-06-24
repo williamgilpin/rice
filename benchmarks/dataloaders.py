@@ -453,7 +453,8 @@ class Kuramoto(DataLoader):
         self.conditions = [[100]]
 
     def fetch_data(self, condition):
-        DATADIR = "/Users/william/program_repos/dygene/data/"
+        # DATADIR = "/Users/william/program_repos/dygene/data/"
+        DATADIR = os.path.join(file_path, "benchmark_datasets")
         amat = np.loadtxt(os.path.join(DATADIR, "kuramoto100_adjmat.csv.gz"), delimiter=',')
         X = np.loadtxt(os.path.join(DATADIR, "kuramoto100_X.csv.gz"), delimiter=',')
         return X[None, :], amat[None, :]
@@ -474,7 +475,7 @@ class McCalla(DataLoader):
         # self.goldtypes = ["chipunion"]
         self.goldtypes = ["chipunion_KDUnion_intersect"]
         # self.celltype = ["hESC", "yeastA2S", "yeastFBS", "mDC", "mESC"]
-        self.celltype = ["mDC"]
+        self.celltype = ["hESC", "mDC"]
         self.conditions = [[item] for item in list(product(self.goldtypes, self.celltype))]
         print(self.conditions)
 
@@ -489,7 +490,8 @@ class McCalla(DataLoader):
         if celltype not in ["hESC", "yeastA2S", "yeastFBS", "mDC", "mESC"]:
             raise ValueError("Celltype must be one of hESC, yeastA2S, yeastFBS, mDC, mESC")
         
-        DATADIR = "/Users/william/program_repos/dygene/data/mccalla/"
+        # DATADIR = "/Users/william/program_repos/dygene/data/mccalla/"
+        DATADIR = os.path.join(file_path, "benchmark_datasets", "mccalla")
 
         if celltype == "hESC":
             df = pd.read_csv(os.path.join(DATADIR, "imputed/han_GSE107552.csv.gz"), header=0).transpose()
@@ -589,7 +591,8 @@ class BEELINE(DataLoader):
         if celltype not in ["hESC", "mESC", "hHep", "mDC", "mHSC-E", "mHSC-GM", "mHSC-L"]:
             raise ValueError("Cellt ype must be one of hESC, mESC, hHep, mDC, mHSC-E, mHSC-GM, mHSC-L")
         
-        DATADIR = "/Users/william/program_repos/dygene/data/"
+        # DATADIR = "/Users/william/program_repos/dygene/data/"
+        DATADIR = os.path.join(file_path, "benchmark_datasets/")
 
         data_dir = DATADIR + f"BEELINE/{n_genes}_{goldtype}_{celltype}/"
         fpath = os.path.join(data_dir, "data.csv")
