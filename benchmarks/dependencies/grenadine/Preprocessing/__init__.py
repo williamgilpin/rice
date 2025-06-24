@@ -1,0 +1,10 @@
+"""
+This submodule contains several pre-processing techniques for gene expression datasets (standardizations, discretizations and RNAseq normalization)
+"""
+__author__ = "Sergio Peignier and Pauline Schmitt"
+__copyright__ = "Copyright 2019, The GReNaDIne Project"
+__license__ = "GPL"
+__version__ = "0.0.9"
+__maintainer__ = "Sergio Peignier"
+__email__ = "sergio.peignier@insa-lyon.fr"
+__status__ = "pre-alpha"

@@ -5,6 +5,7 @@ __pycache__/
 
 # C extensions
 *.so
+.DS_Store
 
 # Ignore personal and development files
 private*
@@ -19,6 +20,13 @@ hccm/data/*
 *GSE110357_htseq_counts_all_v1.csv.gz
 pbmc68k.h5ad
 .DS_Store
+*result_logs/*
+*benchmarks/benchmark_output*
+*benchmarks/dump*
+*benchmarks/benchmark_outputs*
+temp*
+*benchmark_datasets/*
+*benchmarks/benchmark_datasets/*
 
 # PyTorch checkpoints
 *.pth.tar

@@ -23,7 +23,7 @@ warnings.filterwarnings('ignore', message='Forecast type not recognized')
 warnings.filterwarnings("ignore", category=ConvergenceWarning)
 
 relu = lambda x: np.maximum(0, x)
-from umap.umap_ import fuzzy_simplicial_set
+# from umap.umap_ import fuzzy_simplicial_set
 
 import hnswlib
 def neighbors_hnswlib(X, metric='euclidean', k=20):
@@ -270,11 +270,11 @@ class CausalDetection:
             to None, in which case the number of library sizes equals the number of 
             timepoints
         store_intermediates (bool): Whether to store intermediate results
-        neighbors (str): Type of neighbors to use for cross-mapping. Defaults to classic
-            'knn' for K nearest neighbors, while 'simplex' uses fuzzy simplicial set
-            neighbors, which take longer but are more accurate  
+        neighbors (str): Type of neighbors to use for cross-mapping. Defaults to "simplex"
+            which uses fuzzy simplicial set neighbors, which take longer but are more accurate  
+            than classic 'knn' for K nearest neighbors.
         forecast (str): Type of forecast to use for cross-mapping, either "sum" or "smap".
-            Defaults to "sum"
+            Defaults to "smap"
         prune_indirect (bool): Whether to prune indirect relationships due to causal
             transitivity. This helps reduce false positives. Defaults to False
         ensemble (bool): Whether to use ensemble-level cross-mapping. Defaults to False
@@ -284,17 +284,16 @@ class CausalDetection:
     """
     def __init__(
             self, 
-            d_embed=10, 
+            d_embed=3, 
             k=None,
             verbose=True, 
             library_sizes=None, 
             max_library_size=None,
             store_intermediates=False, 
-            neighbors="knn", 
-            forecast="sum",
-            return_features=False,
+            neighbors="simplex", 
+            forecast="smap",
             prune_indirect=False,
-            ensemble=False,
+            ensemble=True,
             significance_threshold=None,
             sweep_d_embed=False
         ):
@@ -309,7 +308,6 @@ class CausalDetection:
         self.k = k
         self.neighbors = neighbors
         self.forecast = forecast
-        self.return_features = return_features
         self.prune_indirect = prune_indirect
         self.ensemble = ensemble
         self.significance_threshold = significance_threshold
@@ -317,11 +315,9 @@ class CausalDetection:
         if self.k is None:
             self.k = self.d_embed + 1
 
-        if self.store_intermediates:
-            self.y_pred = list()
-
-        if self.return_features:
-            self.features = dict()
+        if self.forecast == "simplex" and self.neighbors == "knn":
+            warnings.warn("Simplex neighbors and S-map forecast are not compatible, falling back to sum over neighbors")
+            self.forecast = "sum"
 
     def compute_crossmap(self, Xe, Y, X=None, stride=-1, tpred=0, tol=1e-10):
         """
@@ -386,9 +382,6 @@ class CausalDetection:
                 y_pred = np.sum(Y[:, idx.T] * wgts.T[None, ..., None], axis=2)
                 y_target = Y[:, :y_pred.shape[1], :].copy()
                 y_pred, y_target = np.squeeze(y_pred), np.squeeze(y_target)
-
-            if self.store_intermediates:
-                self.y_pred.append(y_pred.copy())
 
             ## Score the prediction, weighted by the p-value
             rho, pval = batch_pearson(y_pred, y_target, pvalue=True)
@@ -668,6 +661,9 @@ class CausalDetection:
         if self.store_intermediates:
             self.ac = all_causmat.copy()
 
+        # batch_spearman(np.random.randn(X.shape[1], X.shape[1], len(self.library_sizes)), pvalue=False)
+
+        # rho_mono = batch_pearson(all_causmat.T, pvalue=False) # Memory error when batch dimension is too large    
         rho_mono = batch_spearman(all_causmat.T, pvalue=False) # Memory error when batch dimension is too large
         # rho_mono = corr_stream.finalize()
         np.fill_diagonal(rho_mono, 0)

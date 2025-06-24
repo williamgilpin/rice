@@ -1,0 +1,10 @@
+"""
+This submodule contains different data-driven scoring functions to infer GRNs from gene expression datasets
+"""
+__author__ = "Sergio Peignier"
+__copyright__ = "Copyright 2019, The GReNaDIne Project"
+__license__ = "GPL"
+__version__ = "0.0.11"
+__maintainer__ = "Sergio Peignier"
+__email__ = "sergio.peignier@insa-lyon.fr"
+__status__ = "pre-alpha"
