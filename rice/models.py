@@ -292,7 +292,6 @@ class CausalDetection:
             store_intermediates=False, 
             neighbors="simplex", 
             forecast="smap",
-            return_features=False,
             prune_indirect=False,
             ensemble=True,
             significance_threshold=None,
@@ -309,7 +308,6 @@ class CausalDetection:
         self.k = k
         self.neighbors = neighbors
         self.forecast = forecast
-        self.return_features = return_features
         self.prune_indirect = prune_indirect
         self.ensemble = ensemble
         self.significance_threshold = significance_threshold
@@ -317,11 +315,9 @@ class CausalDetection:
         if self.k is None:
             self.k = self.d_embed + 1
 
-        if self.store_intermediates:
-            self.y_pred = list()
-
-        if self.return_features:
-            self.features = dict()
+        if self.forecast == "simplex" and self.neighbors == "knn":
+            warnings.warn("Simplex neighbors and S-map forecast are not compatible, falling back to sum over neighbors")
+            self.forecast = "sum"
 
     def compute_crossmap(self, Xe, Y, X=None, stride=-1, tpred=0, tol=1e-10):
         """
@@ -386,9 +382,6 @@ class CausalDetection:
                 y_pred = np.sum(Y[:, idx.T] * wgts.T[None, ..., None], axis=2)
                 y_target = Y[:, :y_pred.shape[1], :].copy()
                 y_pred, y_target = np.squeeze(y_pred), np.squeeze(y_target)
-
-            if self.store_intermediates:
-                self.y_pred.append(y_pred.copy())
 
             ## Score the prediction, weighted by the p-value
             rho, pval = batch_pearson(y_pred, y_target, pvalue=True)
