@@ -1,4 +1,3 @@
-File Edit Options Buffers Tools Sh-Script Help
 #!/usr/bin/env bash
 set -euo pipefail
 
