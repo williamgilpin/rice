@@ -18,6 +18,22 @@ If you are using mamba, then the following command will create an environment `g
 
 This script assumes that you have working [mamba installation](https://mamba.readthedocs.io/en/latest/) on your system. It will create an environment `gene` and install the necessary dependencies. If `gene` already exists, then the script exits.
 
+### Retrieving the datasets
+
+The large datasets are hosted externally on the Hugging Face platform. If you have not already done so, you will need to install the Hugging Face CLI. This can be done by running the following command:
+
+```bash
+pip install -U "huggingface_hub[cli]"
+```
+
+To download the datasets, run the following command from within the `dygene/benchmarks` directory:
+
+```bash
+    bash fetch_datasets.sh
+``` 
+
+This will download the datasets and place them in the `benchmark_datasets` directory. Note that the total size of all datasets is approximately 2GB.
+
 ### Running benchmarks
 
 The benchmarks can be run by executing the following command in the `dygene/benchmarks` directory
