@@ -16,4 +16,8 @@ mkdir -p "${DEST_DIR}"
 cd "${DEST_DIR}"
 
 ## Download the dataset via Hugging Face CLI (requires huggingface-cli to be installed)
-huggingface-cli download "${REPO}" --repo-type dataset --local-dir "${DEST_DIR}"
+huggingface-cli download "${REPO}" \
+  --repo-type dataset \
+  --local-dir "${DEST_DIR}" \
+  --local-dir-use-symlinks False \
+  --resume-download

@@ -462,8 +462,7 @@ class Kuramoto(DataLoader):
 
 class McCalla(DataLoader):
     """
-    A dataloader for the McCalla scRNA-seq dataset
-    
+    A dataloader for the McCalla et al. scRNA-seq dataset
 
     """
 
@@ -532,11 +531,6 @@ class McCalla(DataLoader):
 
         ## Recompute pseudotime
         X, ptvals = compute_pseudotime(X)
-        # print(np.isinf(X).sum())
-        # print(np.isnan(X).sum())
-        # print(np.isinf(ptvals).sum())
-        # print(np.isnan(ptvals).sum())
-        
 
         ## Jitter to avoid numerical issues
         X += np.random.normal(0, 1e-8, X.shape)
