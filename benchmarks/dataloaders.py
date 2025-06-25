@@ -482,7 +482,6 @@ class McCalla(DataLoader):
 
         goldtype, celltype = condition
 
-
         if goldtype not in ["chipunion_KDUnion_intersect"]:
             raise ValueError("gold standard type must be chipunion_KDUnion_intersect")
         
@@ -507,7 +506,6 @@ class McCalla(DataLoader):
         ## set first row as column names
         df.columns = df.iloc[0]
         df = df.iloc[1:]
-
 
         # ## select first 1000 genes
         # df = df.iloc[:, :1000]

@@ -13,7 +13,8 @@ from rice.metrics import compute_metrics
 
 import time
 def run_benchmark(all_X, all_amat, method, output_fname, hollow=True,
-                  n_datasets=None, batch=False, 
+                  n_datasets=None, 
+                  batch=False, 
                   save_matrix=SAVE_MATRIX,
                   directory="benchmark_output"):
     """
@@ -150,7 +151,15 @@ model_list = [
 ]
 
 
-def run_benchmark_model(item, output_fname, DREAM4_flag=False, nval=None, save_matrix=False, models=None):
+def run_benchmark_model(
+        item, 
+        output_fname, 
+        DREAM4_flag=False, 
+        nval=None, 
+        save_matrix=False, 
+        models=None, 
+        n_datasets=None,
+    ):
     """
     Run a benchmark suite on the given dataset.
 
@@ -161,6 +170,8 @@ def run_benchmark_model(item, output_fname, DREAM4_flag=False, nval=None, save_m
         nval (int): The number of samples to use for each dataset.
         save_matrix (bool): Whether to save the output matrix.
         models (list): A list of models to run the benchmark on.
+        n_datasets (int): Split the dataset into this many chunks and run the benchmark 
+            on each chunk. If None, the dataset will not be chunked.
 
     Returns:
         None
@@ -199,7 +210,7 @@ def run_benchmark_model(item, output_fname, DREAM4_flag=False, nval=None, save_m
                     num_datasets = 10
                 run_benchmark(*item, fit_model, name + "_" + output_fname, n_datasets=num_datasets)
             else:
-                run_benchmark(*item, fit_model, name + "_" + output_fname)
+                run_benchmark(*item, fit_model, name + "_" + output_fname, n_datasets=n_datasets)
 
         if name == "ensemble_prune":
             def fit_model(X):
@@ -212,7 +223,7 @@ def run_benchmark_model(item, output_fname, DREAM4_flag=False, nval=None, save_m
                 )
                 cmat = model.fit(X)
                 return cmat
-            run_benchmark(*item, fit_model, name + "_" + output_fname)
+            run_benchmark(*item, fit_model, name + "_" + output_fname, n_datasets=n_datasets)
 
         if name == "ensemble_noprune":
             def fit_model(X):
@@ -225,7 +236,7 @@ def run_benchmark_model(item, output_fname, DREAM4_flag=False, nval=None, save_m
                 cmat = model.fit(X)
                 # cmat = cmat / cmat.sum(axis=1, keepdims=True)
                 return cmat
-            run_benchmark(*item, fit_model, name + "_" + output_fname)
+            run_benchmark(*item, fit_model, name + "_" + output_fname, n_datasets=n_datasets)
 
         if name == "isolated_noprune":
             def fit_model(X):
@@ -237,7 +248,7 @@ def run_benchmark_model(item, output_fname, DREAM4_flag=False, nval=None, save_m
                 )
                 cmat = model.fit(X)
                 return cmat
-            run_benchmark(*item, fit_model, name + "_" + output_fname)
+            run_benchmark(*item, fit_model, name + "_" + output_fname, n_datasets=n_datasets)
 
         if name == "ccm":
             def fit_model(X):
@@ -261,7 +272,7 @@ def run_benchmark_model(item, output_fname, DREAM4_flag=False, nval=None, save_m
                 )
                 cmat = model.fit(X)
                 return cmat
-            run_benchmark(*item, fit_model, name + "_" + output_fname)
+            run_benchmark(*item, fit_model, name + "_" + output_fname, n_datasets=n_datasets)
 
 
         # Baseline models
@@ -279,7 +290,7 @@ def run_benchmark_model(item, output_fname, DREAM4_flag=False, nval=None, save_m
             else:
                 def fit_model(X):
                     return run_swing(X)
-                run_benchmark(*item, fit_model, name + "_" + output_fname)
+                run_benchmark(*item, fit_model, name + "_" + output_fname, n_datasets=n_datasets)
 
         if name == "wcorr":
             from models import LaggedCorrelations
@@ -287,37 +298,37 @@ def run_benchmark_model(item, output_fname, DREAM4_flag=False, nval=None, save_m
                 model = LaggedCorrelations(method="spearman", max_lag=0.3)
                 cmat = model.fit(X)
                 return cmat
-            run_benchmark(*item, fit_model, name + "_" + output_fname)
+            run_benchmark(*item, fit_model, name + "_" + output_fname, n_datasets=n_datasets)
 
         if name == "scode":
             from scode import run_scode
             def fit_model(X):
                 return run_scode(X)
-            run_benchmark(*item, fit_model, name + "_" + output_fname)
+            run_benchmark(*item, fit_model, name + "_" + output_fname, n_datasets=n_datasets)
 
         if name == "mi":
             from ni import run_ni
             def fit_model(X):
                 return run_ni(X, name="mi")
-            run_benchmark(*item, fit_model, name + "_" + output_fname)
+            run_benchmark(*item, fit_model, name + "_" + output_fname, n_datasets=n_datasets)
 
         if name == "clr":
             from ni import run_ni
             def fit_model(X):
                 return run_ni(X, name="clr")
-            run_benchmark(*item, fit_model, name + "_" + output_fname)
+            run_benchmark(*item, fit_model, name + "_" + output_fname, n_datasets=n_datasets)
 
         if name == "puc":
             from ni import run_ni
             def fit_model(X):
                 return run_ni(X, name="puc")
-            run_benchmark(*item, fit_model, name + "_" + output_fname)
+            run_benchmark(*item, fit_model, name + "_" + output_fname, n_datasets=n_datasets)
 
         if name == "pidc":
             from ni import run_ni
             def fit_model(X):
                 return run_ni(X, name="pidc")
-            run_benchmark(*item, fit_model, name + "_" + output_fname)
+            run_benchmark(*item, fit_model, name + "_" + output_fname, n_datasets=n_datasets)
 
         if name == "dyngenie3":
             from dyngenie3_wrapper import run_dynGENIE3
@@ -332,79 +343,79 @@ def run_benchmark_model(item, output_fname, DREAM4_flag=False, nval=None, save_m
             else:
                 def fit_model(X):
                     return run_dynGENIE3(X)
-                run_benchmark(*item, fit_model, name + "_" + output_fname, batch=True)
+                run_benchmark(*item, fit_model, name + "_" + output_fname, batch=True, n_datasets=n_datasets)
 
         if name == "grenadine_clr":
             from grenadine_models import clr as clr2
             def fit_model(X):
                 return clr2(X)
-            run_benchmark(*item, fit_model, name + "_" + output_fname)
+            run_benchmark(*item, fit_model, name + "_" + output_fname, n_datasets=n_datasets)
 
         if name == "grenadine_genie3":
             from grenadine_models import genie3 as genie3_2
             def fit_model(X):
                 return genie3_2(X)
-            run_benchmark(*item, fit_model, name + "_" + output_fname)
+            run_benchmark(*item, fit_model, name + "_" + output_fname, n_datasets=n_datasets)
 
         if name == "bayesian_ridge":
             from grenadine_models import bayesian_ridge
             def fit_model(X):
                 return bayesian_ridge(X)
-            run_benchmark(*item, fit_model, name + "_" + output_fname)
+            run_benchmark(*item, fit_model, name + "_" + output_fname, n_datasets=n_datasets)
 
         if name == "svr":
             from grenadine_models import svr
             def fit_model(X):
                 return svr(X)
-            run_benchmark(*item, fit_model, name + "_" + output_fname)
+            run_benchmark(*item, fit_model, name + "_" + output_fname, n_datasets=n_datasets)
 
         if name == "tigress":
             from grenadine_models import tigress
             def fit_model(X):
                 return tigress(X)
-            run_benchmark(*item, fit_model, name + "_" + output_fname)
+            run_benchmark(*item, fit_model, name + "_" + output_fname, n_datasets=n_datasets)
 
         if name == "elastica":
             from grenadine_models import elastica
             def fit_model(X):
                 return elastica(X)
-            run_benchmark(*item, fit_model, name + "_" + output_fname)
+            run_benchmark(*item, fit_model, name + "_" + output_fname, n_datasets=n_datasets)
 
         if name == "adaboost":
             from grenadine_models import adaboost
             def fit_model(X):
                 return adaboost(X)
-            run_benchmark(*item, fit_model, name + "_" + output_fname)
+            run_benchmark(*item, fit_model, name + "_" + output_fname, n_datasets=n_datasets)
 
         if name == "grnboost2":
             from grenadine_models import grnboost2
             def fit_model(X):
                 return grnboost2(X)
-            run_benchmark(*item, fit_model, name + "_" + output_fname)
+            run_benchmark(*item, fit_model, name + "_" + output_fname, n_datasets=n_datasets)
 
         if name == "xgenie3":
             from grenadine_models import xgenie3
             def fit_model(X):
                 return xgenie3(X)
-            run_benchmark(*item, fit_model, name + "_" + output_fname)
+            run_benchmark(*item, fit_model, name + "_" + output_fname, n_datasets=n_datasets)
 
         if name == "wasserstein_gren":
             from grenadine_models import wasserstein_gren
             def fit_model(X):
                 return wasserstein_gren(X)
-            run_benchmark(*item, fit_model, name + "_" + output_fname)
+            run_benchmark(*item, fit_model, name + "_" + output_fname, n_datasets=n_datasets)
 
         if name == "energy":
             from grenadine_models import energy
             def fit_model(X):
                 return energy(X)
-            run_benchmark(*item, fit_model, name + "_" + output_fname)
+            run_benchmark(*item, fit_model, name + "_" + output_fname, n_datasets=n_datasets)
 
         if name == "wilcoxon":
             from grenadine_models import wilcoxon
             def fit_model(X):
                 return wilcoxon(X)
-            run_benchmark(*item, fit_model, name + "_" + output_fname)
+            run_benchmark(*item, fit_model, name + "_" + output_fname, n_datasets=n_datasets)
 
         if name == "glasso":
             from sklearn.covariance import GraphicalLassoCV
@@ -414,7 +425,7 @@ def run_benchmark_model(item, output_fname, DREAM4_flag=False, nval=None, save_m
                 cmat = model.covariance_.copy()
                 np.fill_diagonal(cmat, 0)
                 return cmat
-            run_benchmark(*item, fit_model, name + "_" + output_fname)
+            run_benchmark(*item, fit_model, name + "_" + output_fname, n_datasets=n_datasets)
         
         if name == "genie3":
             from GENIE3 import GENIE3
@@ -422,7 +433,7 @@ def run_benchmark_model(item, output_fname, DREAM4_flag=False, nval=None, save_m
                 out = GENIE3(X)
                 cmat = out.copy()
                 return cmat
-            run_benchmark(*item, fit_model, name + "_" + output_fname)
+            run_benchmark(*item, fit_model, name + "_" + output_fname, n_datasets=n_datasets)
 
         if name == "sincerities":
             from sincerities import SINCERITIES
@@ -445,7 +456,7 @@ def run_benchmark_model(item, output_fname, DREAM4_flag=False, nval=None, save_m
                     cmat = np.abs(cmat)
                     np.fill_diagonal(cmat, 0)
                     return cmat
-                run_benchmark(*item, fit_model, name + "_" + output_fname)
+                run_benchmark(*item, fit_model, name + "_" + output_fname, n_datasets=n_datasets)
         
         if name == "aracne":
             from aracne import ARACNE
@@ -455,7 +466,7 @@ def run_benchmark_model(item, output_fname, DREAM4_flag=False, nval=None, save_m
                 cmat = np.abs(cmat)
                 np.fill_diagonal(cmat, 0)
                 return cmat
-            run_benchmark(*item, fit_model, name + "_" + output_fname)
+            run_benchmark(*item, fit_model, name + "_" + output_fname, n_datasets=n_datasets)
 
 
 
