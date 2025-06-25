@@ -22,6 +22,9 @@ warnings.filterwarnings("ignore", message="overflow encountered")
 warnings.filterwarnings('ignore', message='Forecast type not recognized')
 warnings.filterwarnings("ignore", category=ConvergenceWarning)
 
+## Where to write temporary files
+# temp_dir = ""
+
 relu = lambda x: np.maximum(0, x)
 # from umap.umap_ import fuzzy_simplicial_set
 
@@ -440,7 +443,7 @@ class CausalDetection:
         # print("b", flush=True)
         # all_y_pred = np.zeros((m, m, ntx))
         hash_id = uuid.uuid4().hex
-        fname = f"temp_{hash_id}.npy"
+        fname = os.path.join(temp_dir, f"temp_{hash_id}.npy")
         all_y_pred = np.memmap(
             fname, 
             dtype=np.float64, 

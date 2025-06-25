@@ -480,7 +480,7 @@ class McCalla(DataLoader):
 
     def fetch_data(self, condition, metadata=False):
 
-        goldtype, celltype, ngenes = condition
+        ngenes, goldtype, celltype = condition
 
         if goldtype not in ["chipunion_KDUnion_intersect"]:
             raise ValueError("gold standard type must be chipunion_KDUnion_intersect")
