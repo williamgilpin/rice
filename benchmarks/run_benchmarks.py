@@ -29,10 +29,9 @@ models = args.model
 if dataset == "mccalla":
     from dataloaders import McCalla
     for item, condition in McCalla():
-        n_datasets = item[0].shape[1] // 1000
         name_str = "_".join([str(item) for item in condition[0]])
         output_fname = f"mccalla_{name_str}_scores.txt"
-        run_benchmark_model(item, output_fname, nval=100, DREAM4_flag=False, save_matrix=False, models=models, n_datasets=n_datasets)
+        run_benchmark_model(item, output_fname, nval=100, DREAM4_flag=False, models=models)
 
 elif dataset == "kuramoto":
     from dataloaders import Kuramoto
@@ -45,10 +44,9 @@ elif dataset == "kuramoto":
 elif dataset == "beeline":
     from dataloaders import BEELINE
     for item, condition in BEELINE():
-        nval = 100
         name_str = "_".join([str(item) for item in condition[0]])
         output_fname = f"BEELINE_{name_str}_scores.txt"
-        run_benchmark_model(item, output_fname, nval=nval, DREAM4_flag=False, models=models)
+        run_benchmark_model(item, output_fname, nval=100, DREAM4_flag=False, models=models)
 
 elif dataset == "smoketest":
     from dataloaders import Smoketest

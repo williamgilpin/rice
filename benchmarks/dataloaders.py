@@ -469,18 +469,18 @@ class McCalla(DataLoader):
     def __init__(self):
         super().__init__()
 
-
+        self.ngenes = [1000, 500]
         # self.goldtypes = ["KDUnion"]
         # self.goldtypes = ["chipunion"]
         self.goldtypes = ["chipunion_KDUnion_intersect"]
-        # self.celltype = ["hESC", "yeastA2S", "yeastFBS", "mDC", "mESC"]
-        self.celltype = ["hESC", "mDC"]
-        self.conditions = [[item] for item in list(product(self.goldtypes, self.celltype))]
+        self.celltype = ["hESC", "yeastA2S", "yeastFBS", "mDC", "mESC"]
+        # self.celltype = ["hESC", "mDC"]
+        self.conditions = [[item] for item in list(product(self.ngenes, self.goldtypes, self.celltype))]
         print(self.conditions)
 
     def fetch_data(self, condition, metadata=False):
 
-        goldtype, celltype = condition
+        goldtype, celltype, ngenes = condition
 
         if goldtype not in ["chipunion_KDUnion_intersect"]:
             raise ValueError("gold standard type must be chipunion_KDUnion_intersect")
@@ -506,6 +506,11 @@ class McCalla(DataLoader):
         ## set first row as column names
         df.columns = df.iloc[0]
         df = df.iloc[1:]
+
+        ## Find the highest-variance genes
+        var_genes = np.var(df.values, axis=0)
+        var_genes = np.argsort(var_genes)[::-1]
+        df = df.iloc[:, var_genes[:ngenes]]
 
         # ## select first 1000 genes
         # df = df.iloc[:, :1000]
