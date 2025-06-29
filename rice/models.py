@@ -23,7 +23,7 @@ warnings.filterwarnings('ignore', message='Forecast type not recognized')
 warnings.filterwarnings("ignore", category=ConvergenceWarning)
 
 ## Where to write temporary files
-# temp_dir = ""
+temp_dir = ""
 
 relu = lambda x: np.maximum(0, x)
 # from umap.umap_ import fuzzy_simplicial_set
@@ -61,7 +61,7 @@ def neighbors_hnswlib(X, metric='euclidean', k=20):
     # index.set_ef(200)
     # Perform k+1 neighbor queries for each point
     idx, dists = index.knn_query(X, k+1) # Both are (n, k+1)
-    return idx, dists
+    return idx, np.sqrt(dists)
 
 
 def simplex_neighbors(X, metric='euclidean', k=20, tol=1e-6):
@@ -416,6 +416,7 @@ class CausalDetection:
 
         np.fill_diagonal(causal_matrix, 0)
         return causal_matrix
+
 
     def compute_crossmap_ensemble(self, Xe, Y, batch_indices=None, stride=-1, tpred=0, tol=1e-10):
         """
