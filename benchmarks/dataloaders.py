@@ -537,8 +537,20 @@ class McCalla(DataLoader):
 
         ## Jitter to avoid numerical issues
         X += np.random.normal(0, 1e-8, X.shape)
+
+        X2 = np.log1p(np.abs(X)).copy()
+        X2 = (X2 - np.mean(X2, axis=0)) / np.std(X2, axis=0)
+        sigma_values = calculate_sigma(X2, channelwise=False)
+        print(
+            np.mean(np.log(1/sigma_values.squeeze())), 
+            np.mean(1/sigma_values.squeeze()),
+            np.median(np.log(1/sigma_values.squeeze())), 
+            np.median(1/sigma_values.squeeze())
+        )
+
         if metadata:
             return X[None, :], amat[None, :], gene_names
+        
 
         return X[None, :], amat[None, :] 
 

@@ -44,7 +44,7 @@ This will download the datasets and place them in the `benchmark_datasets` direc
 
 The benchmarks can be run by executing the following command in the `dygene/benchmarks` directory
 
-    python run_benchmarks.py --dataset <dataset_name>
+    python run_benchmarks.py --dataset <dataset_name> --model <method_name>
 
 Where `<dataset_name>` is one of the following:
 + `dream4` is the DREAM4 dataset

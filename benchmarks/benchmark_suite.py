@@ -49,7 +49,7 @@ def run_benchmark(all_X, all_amat, method, output_fname, hollow=True,
             if not n_datasets:
                 cmat = method(X)
             else:
-                Xall = np.array(np.array_split(X, n_datasets))
+                Xall = np.array_split(X, n_datasets)
                 if batch:
                     cmat = method(Xall)
                 else:

@@ -42,10 +42,8 @@ def run_deepsem(X, num_replicates=10):
     gene_pairs = list(zip(top_inds[0], top_inds[1]))
     gene_pairs = [(gene_names[i], gene_names[j]) for i, j in gene_pairs]
 
-
     ## Prior is all genes
     # gene_pairs = list(itertools.product(gene_names, gene_names))
-
 
     # Add header "Gene1" and "Gene2" and save to CSV
     gene_pairs = [item for item in gene_pairs if item[0] != item[1]] # No self-loops
