@@ -1,4 +1,3 @@
-
 import os
 import sys
 import glob
@@ -474,7 +473,7 @@ class McCalla(DataLoader):
         # self.goldtypes = ["chipunion"]
         self.goldtypes = ["chipunion_KDUnion_intersect"]
         self.celltype = ["hESC", "yeastA2S", "yeastFBS", "mDC", "mESC"]
-        # self.celltype = ["hESC", "mDC"]
+        self.celltype = ["yeastA2S", "yeastFBS"]
         self.conditions = [[item] for item in list(product(self.ngenes, self.goldtypes, self.celltype))]
         print(self.conditions)
 
@@ -529,6 +528,7 @@ class McCalla(DataLoader):
         )
         gene_names = list(df.columns)
         amat = make_goldstandard_matrix(gene_names, gold_links, mask_tf=True, symmetric=False)
+        # print("Number of interactions:", np.nansum(amat))
 
         X = df.values.copy().astype(float)
 
@@ -538,19 +538,19 @@ class McCalla(DataLoader):
         ## Jitter to avoid numerical issues
         X += np.random.normal(0, 1e-8, X.shape)
 
-        X2 = np.log1p(np.abs(X)).copy()
-        X2 = (X2 - np.mean(X2, axis=0)) / np.std(X2, axis=0)
-        sigma_values = calculate_sigma(X2, channelwise=False)
-        print(
-            np.mean(np.log(1/sigma_values.squeeze())), 
-            np.mean(1/sigma_values.squeeze()),
-            np.median(np.log(1/sigma_values.squeeze())), 
-            np.median(1/sigma_values.squeeze())
-        )
+        ## Calculate nonlinear scores
+        # X2 = np.log1p(np.abs(X)).copy()
+        # X2 = (X2 - np.mean(X2, axis=0)) / np.std(X2, axis=0)
+        # sigma_values = calculate_sigma(X2, channelwise=False)
+        # print(
+        #     np.mean(np.log(1/sigma_values.squeeze())), 
+        #     np.mean(1/sigma_values.squeeze()),
+        #     np.median(np.log(1/sigma_values.squeeze())), 
+        #     np.median(1/sigma_values.squeeze())
+        # )
 
         if metadata:
             return X[None, :], amat[None, :], gene_names
-        
 
         return X[None, :], amat[None, :] 
 

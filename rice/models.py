@@ -450,7 +450,7 @@ class CausalDetection:
 
         ## If the prediction array would be larger than 500MB, store in a temporary file
         hash_id = uuid.uuid4().hex
-        fname = os.path.join(temp_dir, f"temp_{hash_id}.npy")
+        fname = os.path.join(temp_dir, f"temp_rice_{hash_id}.npy")
         if 4 * m * m * ntx < 5e8: # 500MB
             all_y_pred = np.zeros((m, m, ntx))
         else:
@@ -463,7 +463,7 @@ class CausalDetection:
             )
         
         # hash_id = uuid.uuid4().hex
-        # fname = os.path.join(temp_dir, f"temp_{hash_id}.npy") # 1GB
+        # fname = os.path.join(temp_dir, f"temp_rice_{hash_id}.npy") # 1GB
         # if self.verbose: print(f"Storing temporary file at {fname}", flush=True)
         # all_y_pred = np.memmap(
         #     fname, 
