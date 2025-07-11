@@ -473,7 +473,7 @@ class McCalla(DataLoader):
         # self.goldtypes = ["chipunion"]
         self.goldtypes = ["chipunion_KDUnion_intersect"]
         self.celltype = ["hESC", "yeastA2S", "yeastFBS", "mDC", "mESC"]
-        self.celltype = ["yeastA2S", "yeastFBS"]
+        # self.celltype = ["yeastA2S", "yeastFBS"]
         self.conditions = [[item] for item in list(product(self.ngenes, self.goldtypes, self.celltype))]
         print(self.conditions)
 
