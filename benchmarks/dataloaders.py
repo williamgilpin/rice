@@ -10,7 +10,7 @@ import warnings
 file_path = os.path.dirname(os.path.abspath(__file__))
 ## add current directory to path
 sys.path.append(file_path)
-from dataloader_utils import fetch_interaction_matrix
+from dataloader_utils import fetch_interaction_matrix, embed_ts
 
 import itertools
 from itertools import product
