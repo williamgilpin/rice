@@ -12,11 +12,17 @@ A set of benchmarks for inferring interaction networks from time series data. Th
 
 Dependencies are managed using conda or mamba. All external packages have been downloaded and are called locally, and so the only internal dependencies are the standard dependencies `scikit-learn`, `scipy`, `numpy`, `yellowbrick`, `POT`
 
-If you are using mamba, then the following command will create an environment `gene` with the necessary dependencies:
+If you are using mamba, then the following command will create an environment `gene` with the necessary Pythondependencies:
 
     ./mamba_install.sh
 
 This script assumes that you have working [mamba installation](https://mamba.readthedocs.io/en/latest/) on your system. It will create an environment `gene` and install the necessary dependencies. If `gene` already exists, then the script exits.
+
+Several benchmark models use [`NetworkInference.jl`](https://github.com/Tchanders/NetworkInference.jl), and so you may need to install Julia. The following command will install Julia:
+
+```bash
+    curl -fsSL https://install.julialang.org | sh
+```
 
 ### Retrieving the datasets
 
@@ -38,7 +44,7 @@ This will download the datasets and place them in the `benchmark_datasets` direc
 
 The benchmarks can be run by executing the following command in the `dygene/benchmarks` directory
 
-    python run_benchmarks.py --dataset <dataset_name>
+    python run_benchmarks.py --dataset <dataset_name> --model <method_name>
 
 Where `<dataset_name>` is one of the following:
 + `dream4` is the DREAM4 dataset

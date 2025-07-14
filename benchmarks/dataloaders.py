@@ -1,4 +1,3 @@
-
 import os
 import sys
 import glob
@@ -11,7 +10,7 @@ import warnings
 file_path = os.path.dirname(os.path.abspath(__file__))
 ## add current directory to path
 sys.path.append(file_path)
-from dataloader_utils import fetch_interaction_matrix
+from dataloader_utils import fetch_interaction_matrix, embed_ts
 
 import itertools
 from itertools import product
@@ -462,27 +461,25 @@ class Kuramoto(DataLoader):
 
 class McCalla(DataLoader):
     """
-    A dataloader for the McCalla scRNA-seq dataset
-    
+    A dataloader for the McCalla et al. scRNA-seq dataset
 
     """
 
     def __init__(self):
         super().__init__()
 
-
+        self.ngenes = [1000, 500]
         # self.goldtypes = ["KDUnion"]
         # self.goldtypes = ["chipunion"]
         self.goldtypes = ["chipunion_KDUnion_intersect"]
-        # self.celltype = ["hESC", "yeastA2S", "yeastFBS", "mDC", "mESC"]
-        self.celltype = ["hESC", "mDC"]
-        self.conditions = [[item] for item in list(product(self.goldtypes, self.celltype))]
+        self.celltype = ["hESC", "yeastA2S", "yeastFBS", "mDC", "mESC"]
+        # self.celltype = ["yeastA2S", "yeastFBS"]
+        self.conditions = [[item] for item in list(product(self.ngenes, self.goldtypes, self.celltype))]
         print(self.conditions)
 
     def fetch_data(self, condition, metadata=False):
 
-        goldtype, celltype = condition
-
+        ngenes, goldtype, celltype = condition
 
         if goldtype not in ["chipunion_KDUnion_intersect"]:
             raise ValueError("gold standard type must be chipunion_KDUnion_intersect")
@@ -509,6 +506,10 @@ class McCalla(DataLoader):
         df.columns = df.iloc[0]
         df = df.iloc[1:]
 
+        ## Find the highest-variance genes
+        var_genes = np.var(df.values, axis=0)
+        var_genes = np.argsort(var_genes)[::-1]
+        df = df.iloc[:, var_genes[:ngenes]]
 
         # ## select first 1000 genes
         # df = df.iloc[:, :1000]
@@ -527,19 +528,27 @@ class McCalla(DataLoader):
         )
         gene_names = list(df.columns)
         amat = make_goldstandard_matrix(gene_names, gold_links, mask_tf=True, symmetric=False)
+        # print("Number of interactions:", np.nansum(amat))
 
         X = df.values.copy().astype(float)
 
         ## Recompute pseudotime
         X, ptvals = compute_pseudotime(X)
-        # print(np.isinf(X).sum())
-        # print(np.isnan(X).sum())
-        # print(np.isinf(ptvals).sum())
-        # print(np.isnan(ptvals).sum())
-        
 
         ## Jitter to avoid numerical issues
         X += np.random.normal(0, 1e-8, X.shape)
+
+        ## Calculate nonlinear scores
+        # X2 = np.log1p(np.abs(X)).copy()
+        # X2 = (X2 - np.mean(X2, axis=0)) / np.std(X2, axis=0)
+        # sigma_values = calculate_sigma(X2, channelwise=False)
+        # print(
+        #     np.mean(np.log(1/sigma_values.squeeze())), 
+        #     np.mean(1/sigma_values.squeeze()),
+        #     np.median(np.log(1/sigma_values.squeeze())), 
+        #     np.median(1/sigma_values.squeeze())
+        # )
+
         if metadata:
             return X[None, :], amat[None, :], gene_names
 

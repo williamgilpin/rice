@@ -1,5 +1,4 @@
 import numpy as np
-# import jax.numpy as np
 import warnings
 import os
 import uuid
@@ -21,6 +20,9 @@ warnings.filterwarnings("ignore", message="The iteration is not making good prog
 warnings.filterwarnings("ignore", message="overflow encountered")
 warnings.filterwarnings('ignore', message='Forecast type not recognized')
 warnings.filterwarnings("ignore", category=ConvergenceWarning)
+
+## Where to write temporary files
+temp_dir = ""
 
 relu = lambda x: np.maximum(0, x)
 # from umap.umap_ import fuzzy_simplicial_set
@@ -58,7 +60,7 @@ def neighbors_hnswlib(X, metric='euclidean', k=20):
     # index.set_ef(200)
     # Perform k+1 neighbor queries for each point
     idx, dists = index.knn_query(X, k+1) # Both are (n, k+1)
-    return idx, dists
+    return idx, np.sqrt(dists)
 
 
 def simplex_neighbors(X, metric='euclidean', k=20, tol=1e-6):
@@ -90,7 +92,6 @@ def simplex_neighbors(X, metric='euclidean', k=20, tol=1e-6):
     return wgts, idx, sigmas
 
 
-
 def find_sigma(dists, tol=1e-6):
     """
     Given a list of distances to k nearest neighbors, find the sigma for each point
@@ -110,6 +111,7 @@ def find_sigma(dists, tol=1e-6):
     sigma = fsolve(func, rho, fprime=jac, xtol=tol)[0]
     dists_transformed = np.exp(-relu(dists - rho) / (sigma + tol))
     return sigma, dists_transformed
+
 
 def compute_sigmas_vectorized(dists, tol=1e-6, max_iter=50, jac_eps=1e-6):
     """
@@ -269,6 +271,9 @@ class CausalDetection:
         max_library_size (int): Maximum library size to use for cross-mapping. Defaults 
             to None, in which case the number of library sizes equals the number of 
             timepoints
+        minibatch (bool): Whether to use minibatch cross-mapping. Used for large datasets. 
+            Defaults to False
+        minibatch_size (int): Size of minibatch to use for cross-mapping. Defaults to 1000
         store_intermediates (bool): Whether to store intermediate results
         neighbors (str): Type of neighbors to use for cross-mapping. Defaults to "simplex"
             which uses fuzzy simplicial set neighbors, which take longer but are more accurate  
@@ -280,6 +285,9 @@ class CausalDetection:
         ensemble (bool): Whether to use ensemble-level cross-mapping. Defaults to False
         significance_threshold (float): Threshold for significance in cross-mapping. Defaults
             to None, in which case the causal matrix is not thresholded
+        dilation_factor (float): Factor by which decimate the time series, in order to
+            test for scaling of causal relationships with the number of timepoints. Defaults
+            to 1.5
         sweep_d_embed (bool): Whether to sweep the embedding dimension. Defaults to False
     """
     def __init__(
@@ -289,12 +297,15 @@ class CausalDetection:
             verbose=True, 
             library_sizes=None, 
             max_library_size=None,
+            minibatch=False,
+            minibatch_size=1000,
             store_intermediates=False, 
             neighbors="simplex", 
             forecast="smap",
             prune_indirect=False,
             ensemble=True,
             significance_threshold=None,
+            dilation_factor=1.5,
             sweep_d_embed=False
         ):
         self.n_genes = None
@@ -304,6 +315,8 @@ class CausalDetection:
         self.verbose = verbose
         self.library_sizes = library_sizes
         self.max_library_size = max_library_size
+        self.minibatch = minibatch
+        self.minibatch_size = minibatch_size
         self.store_intermediates = store_intermediates
         self.k = k
         self.neighbors = neighbors
@@ -311,6 +324,7 @@ class CausalDetection:
         self.prune_indirect = prune_indirect
         self.ensemble = ensemble
         self.significance_threshold = significance_threshold
+        self.dilation_factor = dilation_factor
         self.sweep_d_embed = sweep_d_embed
         if self.k is None:
             self.k = self.d_embed + 1
@@ -407,6 +421,7 @@ class CausalDetection:
         np.fill_diagonal(causal_matrix, 0)
         return causal_matrix
 
+
     def compute_crossmap_ensemble(self, Xe, Y, batch_indices=None, stride=-1, tpred=0, tol=1e-10):
         """
         Use cross-mapping to to predict Y from Xe
@@ -432,14 +447,30 @@ class CausalDetection:
             Y = Y.T
         # print("b", flush=True)
         # all_y_pred = np.zeros((m, m, ntx))
+
+        ## If the prediction array would be larger than 500MB, store in a temporary file
         hash_id = uuid.uuid4().hex
-        fname = f"temp_{hash_id}.npy"
-        all_y_pred = np.memmap(
-            fname, 
-            dtype=np.float64, 
-            mode="w+", 
-            shape=(m, m, ntx)
-        )
+        fname = os.path.join(temp_dir, f"temp_rice_{hash_id}.npy")
+        if 4 * m * m * ntx < 5e8: # 500MB
+            all_y_pred = np.zeros((m, m, ntx))
+        else:
+            if self.verbose: print(f"Storing temporary file at {fname}", flush=True)
+            all_y_pred = np.memmap(
+                fname, 
+                dtype=np.float64, 
+                mode="w+", 
+                shape=(m, m, ntx)
+            )
+        
+        # hash_id = uuid.uuid4().hex
+        # fname = os.path.join(temp_dir, f"temp_rice_{hash_id}.npy") # 1GB
+        # if self.verbose: print(f"Storing temporary file at {fname}", flush=True)
+        # all_y_pred = np.memmap(
+        #     fname, 
+        #     dtype=np.float64, 
+        #     mode="w+", 
+        #     shape=(m, m, ntx)
+        # )
 
         k = min(ntx - 1, self.k)
         causal_matrix = np.zeros((m, m))
@@ -447,7 +478,6 @@ class CausalDetection:
         I = np.eye(k)[None, :, :]
         # print("c", flush=True)
         lambda_reg = 0.5 * m * 100000 # Scale regularization parameter to the number of features
-
         
         # print("d", flush=True)
         ## Outer index runs over causes, which we use for lookups into the downstream
@@ -544,8 +574,9 @@ class CausalDetection:
         #     # print("9", flush=True)
         #     causal_matrix[:, i] = A.squeeze()
         
+
         for i in range(m):
-            # --- First pass: compute sums for means, inner products, and Y variance ---
+            # First pass: compute sums for means, inner products, and Y variance
             n = 0
             sum_x = np.zeros(m)
             sum_y = 0.0
@@ -564,13 +595,13 @@ class CausalDetection:
             mu_x = sum_x / n
             mu_y = sum_y / n
 
-            # centered cross‐product A_j = ∑ₜ (xₜⱼ − μₓⱼ)(yₜ − μᵧ)
+            # Cross‐product A_j = ∑ₜ (xₜⱼ − μₓⱼ)(yₜ − μᵧ)
             A = sum_xy - n * mu_x * mu_y
 
-            # centered variance of Y: ∑ₜ (yₜ − μᵧ)²
+            # Variance of Y: ∑ₜ (yₜ − μᵧ)²
             sum_y2c = sum_y2 - n * mu_y**2
 
-            # streaming correlation between predicted and actual Y
+            # streaming Pearson correlation between predicted and actual Y
             sum_pred2 = 0.0
             sum_pred_y = 0.0
             for t in range(ntx):
@@ -595,7 +626,13 @@ class CausalDetection:
         np.fill_diagonal(causal_matrix, 0)
         return causal_matrix
 
-
+    def _strided_op(self, X, op=lambda x: x):
+        """
+        Apply a function repeated to strided subsets of a time series
+        """
+        self.library_sizes = np.unique((self.dilation_factor ** np.arange(0, int(np.floor(np.log(X.shape[0]  / (self.d_embed + 1))/np.log(self.dilation_factor))))).astype(int))[::-1]
+        for stride in self.library_sizes:
+            yield op(X[..., ::stride])
 
     def fit(self, X, y=None):
         """
@@ -631,16 +668,18 @@ class CausalDetection:
         if self.library_sizes is None:
             if self.max_library_size is None:
                 # self.library_sizes = np.arange(1, int(np.floor(self.n  / (self.d_embed + 1))))[::-1]
-                base_stride = 1.5
-                self.library_sizes = np.unique((base_stride ** np.arange(0, int(np.floor(np.log(self.n  / (self.d_embed + 1))/np.log(base_stride))))).astype(int))[::-1]
-                #self.library_sizes = (2 ** np.arange(0, int(np.floor(np.log2(self.n  / (self.d_embed + 1)))))).astype(int)[::-1]
-                # self.library_sizes = np.unique(np.floor(self.n // np.linspace(1, 2, 50)).astype(int))
+                self.library_sizes = np.unique((self.dilation_factor ** np.arange(0, int(np.floor(np.log(self.n  / (self.d_embed + 1))/np.log(self.dilation_factor))))).astype(int))[::-1]
             else:
                 self.library_sizes = np.unique(np.linspace(1, int(np.floor(self.n  / (self.d_embed + 1))), self.max_library_size).astype(int))[::-1]
         ## check that library sizes increase monotonically
         if not np.all(np.diff(self.library_sizes) <= 0):
             warnings.warn("Stride sizes must decrease monotonically. Sorting library sizes.")
             self.library_sizes = np.sort(self.library_sizes)[::-1]
+
+        # ## If minibatch is enabled, only use library sizes that are less than the minibatch size
+        # if self.minibatch:
+        #     self.library_sizes = self.library_sizes[self.library_sizes < self.minibatch_size]
+
         all_causmat = np.zeros((len(self.library_sizes), X.shape[1], X.shape[1]))
 
         ## Iterate over library sizes to test robustness of causal matrix
@@ -650,11 +689,15 @@ class CausalDetection:
             
             if self.verbose:
                 progress_bar(i, len(self.library_sizes))
-            
+
+            subset_inds = np.arange(0, Xe.shape[1], stride)
+            if self.minibatch and Xe[:, ::stride].shape[1] > self.minibatch_size:
+                subset_inds = subset_inds[:self.minibatch_size]
+                
             if self.ensemble:
-                all_causmat[i] = self.compute_crossmap_ensemble(Xe[:, ::stride], y[:-(self.d_embed - 1)][::stride])
+                all_causmat[i] = self.compute_crossmap_ensemble(Xe[:, subset_inds], y[:-(self.d_embed - 1)][subset_inds])
             else:
-                all_causmat[i] = self.compute_crossmap(Xe[:, ::stride], y[:-(self.d_embed - 1)][::stride])
+                all_causmat[i] = self.compute_crossmap(Xe[:, subset_inds], y[:-(self.d_embed - 1)][subset_inds])
 
             # corr_stream.update(all_causmat[i])
 
