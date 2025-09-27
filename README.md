@@ -55,7 +55,7 @@ The examples and tests require additional dependencies:
 
 ### Benchmarks
 
-To install and run the benchmarks, see the instructions in the [BENCHMARKS.md](./benchmarks/BENCHMARKS.md) file. Briefy, yhe benchmarks are run by executing the following command in the `benchmarks` directory
+To install and run the benchmarks, see the full instructions in the [BENCHMARKS.md](./benchmarks/BENCHMARKS.md) file. The benchmarks are run by executing the following command in the `benchmarks` directory
 
 ```bash
     python run_benchmarks.py --dataset <dataset_name> --model <method_name>
@@ -65,12 +65,21 @@ Where `<dataset_name>` is one of the six benchmark datasets: `dream4`, `twist`, 
 
 ### What do we mean by "Causality"?
 
-Our approach aims to discover weak (observational) causality, in the sense of Granger causality but generalized for nonlinear dynamical systems. This form of causality is equivalent a discovering a forcing term in a system of coupled differential equations.
+Our approach aims to discover weak (observational) causality, in the sense of Granger causality, but generalized for nonlinear dynamical systems. This form of causality is equivalent a discovering a forcing term in a system of coupled differential equations.
 
 We do not discover strong (interventional) causality, in the sense of Pearl's do-calculus, which is impossible without the ability to intervene on the data generator (the experimental system).
-<!-- 
-### References -->
 
+### References
+
+If you find this code useful, please consider citing our paper:
+
+```bibtex
+@article{krieger2025rice,
+  title={Interpretable gene network inference with nonlinear causalitys},
+  author={Krieger, Madison Ski and Gilpin, William},
+  year={2025}
+}
+```
 
 
 

@@ -46,7 +46,7 @@ def neighbors_hnswlib(X, metric='euclidean', k=20):
     if metric == 'euclidean':
         metric = 'l2'
     elif metric == 'cosine':
-        metric = 'angular'
+        metric = 'cosine'
     else:
         raise ValueError(f"Metric {metric} not supported")
 
@@ -60,7 +60,9 @@ def neighbors_hnswlib(X, metric='euclidean', k=20):
     # index.set_ef(200)
     # Perform k+1 neighbor queries for each point
     idx, dists = index.knn_query(X, k+1) # Both are (n, k+1)
-    return idx, np.sqrt(dists)
+    if metric == 'l2':
+        dists = np.sqrt(dists)
+    return idx, dists
 
 
 def simplex_neighbors(X, metric='euclidean', k=20, tol=1e-6):
