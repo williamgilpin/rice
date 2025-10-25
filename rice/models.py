@@ -28,71 +28,218 @@ relu = lambda x: np.maximum(0, x)
 # from umap.umap_ import fuzzy_simplicial_set
 
 import hnswlib
+# def neighbors_hnswlib(X, metric='euclidean', k=20):
+#     """
+#     Use hnswlib for approximate k-nearest neighbors of each point in a dataset.
+#     Returns the indices and distances of the neighbors.
+
+#     Args:
+#         X (np.ndarray): dataset of shape (n, d)
+#         metric (str): distance metric to use
+#         k (int): number of nearest neighbors to use in the distance calculation
+
+#     Returns:
+#         idx (np.ndarray): indices of the neighbors
+#         dists (np.ndarray): distances to the neighbors
+#     """
+#     n, d = X.shape
+#     if metric == 'euclidean':
+#         metric = 'l2'
+#     elif metric == 'cosine':
+#         metric = 'cosine'
+#     else:
+#         raise ValueError(f"Metric {metric} not supported")
+
+#     # Initialize the HNSW index: space='l2' for Euclidean, 'cosine' for angular distance
+#     index = hnswlib.Index(space=metric, dim=d)
+#     # Prepare index to hold n elements; tune M and ef_construction as desired
+#     index.init_index(max_elements=n, M=12, ef_construction=200)
+#     # Add all vectors (cast to float32) with integer labels 0…n−1
+#     index.add_items(X, np.arange(n))
+#     # Set query-time parameter for recall/speed trade-off
+#     # index.set_ef(200)
+#     # Perform k+1 neighbor queries for each point
+#     idx, dists = index.knn_query(X, k+1) # Both are (n, k+1)
+#     if metric == 'l2':
+#         dists = np.sqrt(dists)
+#     return idx, dists
+
+
+# def simplex_neighbors(X, metric='euclidean', k=20, tol=1e-6):
+#     """
+#     Compute the distance between points in a dataset using the simplex distance metric.
+
+#     Args:
+#         X (np.ndarray): dataset of shape (n, d)
+#         metric (str): distance metric to use
+#         k (int): number of nearest neighbors to use in the distance calculation
+#         tol (float): tolerance for the distance calculation
+
+#     Returns:
+#         np.ndarray: distance matrix of shape (n, m)
+
+#     """
+
+#     idx, dists = neighbors_hnswlib(X, metric, k)
+
+#     dists, idx = dists[:, 1:].T, idx[:, 1:].T
+    
+#     rhos = dists[0]
+#     sigmas = np.array([find_sigma(drow, tol=tol)[0] for drow in dists.T])
+#     sigmas += tol # Add a small tolerance to avoid division by zero
+
+#     # sigmas, dists_transformed = compute_sigmas_vectorized(dists, tol=1e-6)
+
+#     wgts = np.exp(-relu(dists - rhos[None, :]) / sigmas[None, :])
+#     return wgts, idx, sigmas
+
+
+
+
 def neighbors_hnswlib(X, metric='euclidean', k=20):
     """
-    Use hnswlib for approximate k-nearest neighbors of each point in a dataset.
-    Returns the indices and distances of the neighbors.
-
     Args:
-        X (np.ndarray): dataset of shape (n, d)
-        metric (str): distance metric to use
-        k (int): number of nearest neighbors to use in the distance calculation
+        X (np.ndarray): dataset of shape (n, d), will be cast to float32
+        metric (str): 'euclidean' or 'cosine'
+        k (int): number of nearest neighbors (excludes self after query)
 
     Returns:
-        idx (np.ndarray): indices of the neighbors
-        dists (np.ndarray): distances to the neighbors
+        (idx, dists): both np.ndarray with shapes (n, k+1) before postproc
     """
     n, d = X.shape
-    if metric == 'euclidean':
-        metric = 'l2'
-    elif metric == 'cosine':
-        metric = 'cosine'
-    else:
+    space = 'l2' if metric == 'euclidean' else 'cosine'
+    if space not in ('l2', 'cosine'):
         raise ValueError(f"Metric {metric} not supported")
 
-    # Initialize the HNSW index: space='l2' for Euclidean, 'cosine' for angular distance
-    index = hnswlib.Index(space=metric, dim=d)
-    # Prepare index to hold n elements; tune M and ef_construction as desired
+    index = hnswlib.Index(space=space, dim=d)
     index.init_index(max_elements=n, M=12, ef_construction=200)
-    # Add all vectors (cast to float32) with integer labels 0…n−1
-    index.add_items(X, np.arange(n))
-    # Set query-time parameter for recall/speed trade-off
-    # index.set_ef(200)
-    # Perform k+1 neighbor queries for each point
-    idx, dists = index.knn_query(X, k+1) # Both are (n, k+1)
-    if metric == 'l2':
-        dists = np.sqrt(dists)
+    index.add_items(X.astype(np.float32, copy=False), np.arange(n))
+    index.set_ef(max(50, 4 * k))  # better speed/recall tradeoff for small k
+    idx, dists = index.knn_query(X.astype(np.float32, copy=False), k+1)
+    if space == 'l2':  # hnswlib returns squared L2; match previous behavior
+        dists = np.sqrt(dists, out=dists)
     return idx, dists
+
+
+def compute_sigmas_vectorized(dists, tol=1e-6, grid_points=48):
+    """
+    Vectorized replacement for per-point fsolve in find_sigma.
+    Solves for sigma (per column) from sum_j exp(-max(d_j - rho, 0)/(sigma+tol)) = log2(k).
+
+    Args:
+        dists (np.ndarray): shape (k, n), sorted ascending per column (nearest on row 0)
+        tol (float): numerical floor added to denominators
+        grid_points (int): number of log-spaced sigma candidates
+
+    Returns:
+        sigmas (np.ndarray): shape (n,)
+        weights (np.ndarray): shape (k, n), equals exp(-relu(dists - rho)/ (sigma + tol))
+    """
+    k, n = dists.shape
+    target = np.log2(k)  # same target as original
+    rhos = dists[0]      # (n,)
+    A = np.maximum(dists - rhos[None, :], 0.0)  # (k, n)
+
+    # Global, conservative sigma bracket (ensures monotonic coverage for all columns)
+    amax = float(A.max())
+    sigma_min = tol
+    sigma_max = (amax if amax > 0.0 else 1.0) * 64.0
+    sg = np.exp(np.linspace(np.log(sigma_min), np.log(sigma_max), grid_points))  # (g,)
+
+    # S(σ) = sum_j exp(-A_j/(σ+tol)), computed for all σ, all columns
+    # Result shape: (n, g)
+    S = np.exp(-A[..., None] / (sg[None, None, :] + tol)).sum(axis=0)
+
+    # For each column, find first σ where S >= target (monotone in σ)
+    mask = S >= target
+    # Guarantee a valid bracket by forcing at least one True (σ_max -> S ≈ k >= target)
+    first_true = mask.argmax(axis=1)                            # (n,)
+    first_true = np.where(mask.any(axis=1), first_true, grid_points - 1)
+    j_hi = np.maximum(first_true, 1)
+    j_lo = j_hi - 1
+
+    S_lo = S[np.arange(n), j_lo]
+    S_hi = S[np.arange(n), j_hi]
+    sig_lo = sg[j_lo]
+    sig_hi = sg[j_hi]
+
+    # Secant interpolation inside the bracket
+    sigmas = sig_lo + (target - S_lo) * (sig_hi - sig_lo) / (S_hi - S_lo + 1e-12)
+
+    # Compute final weights with the solved sigmas
+    weights = np.exp(-A / (sigmas[None, :] + tol))
+    return sigmas, weights
 
 
 def simplex_neighbors(X, metric='euclidean', k=20, tol=1e-6):
     """
-    Compute the distance between points in a dataset using the simplex distance metric.
-
     Args:
-        X (np.ndarray): dataset of shape (n, d)
-        metric (str): distance metric to use
-        k (int): number of nearest neighbors to use in the distance calculation
-        tol (float): tolerance for the distance calculation
+        X (np.ndarray): (n, d)
+        metric (str): 'euclidean' or 'cosine'
+        k (int): number of neighbors used for weights
+        tol (float): numerical tolerance
 
     Returns:
-        np.ndarray: distance matrix of shape (n, m)
-
+        wgts (np.ndarray): (k, n)
+        idx  (np.ndarray): (k, n)
+        sigmas (np.ndarray): (n,)
     """
-
     idx, dists = neighbors_hnswlib(X, metric, k)
-
+    # drop self and transpose to (k, n) to match vectorized solver
     dists, idx = dists[:, 1:].T, idx[:, 1:].T
-    
-    rhos = dists[0]
-    sigmas = np.array([find_sigma(drow, tol=tol)[0] for drow in dists.T])
-    sigmas += tol # Add a small tolerance to avoid division by zero
-
-    # sigmas, dists_transformed = compute_sigmas_vectorized(dists, tol=1e-6)
-
-    wgts = np.exp(-relu(dists - rhos[None, :]) / sigmas[None, :])
+    sigmas, wgts = compute_sigmas_vectorized(dists, tol=tol)
     return wgts, idx, sigmas
 
+    
+
+# def find_sigma(dists, tol=1e-6):
+#     """
+#     Given a list of distances to k nearest neighbors, find the sigma for each point
+
+#     Args:
+#         dists (np.ndarray): A matrix of shape (k,)
+#         tol (float): The tolerance for the sigma
+
+#     Returns:
+#         float: The sigma corresponding to the neighborhood scale
+#         np.ndarray: The transformed distances
+#     """
+#     d = np.asarray(dists, dtype=np.float64)
+#     k = d.size
+#     rho = float(np.min(d))
+#     rel = np.maximum(d - rho, 0.0)
+#     target = np.log2(k)
+
+#     # Degenerate: all neighbors at rho -> S(σ) == k for all σ; best nonnegative σ is 0
+#     if np.all(rel == 0):
+#         sigma = 0.0
+#         return sigma, np.ones_like(d, dtype=np.float64)
+
+#     # If S(0) already ≥ target, the minimum feasible σ is 0
+#     S0 = float(np.sum(np.exp(-rel / max(tol, 1e-12))))
+#     if S0 >= target:
+#         sigma = 0.0
+#         return sigma, np.exp(-rel / max(tol, 1e-12))
+
+#     # Find a bracketing hi with S(hi) ≥ target (S is monotone increasing in σ)
+#     lo, hi = 0.0, max(rel.max(), tol)
+#     for _ in range(64):
+#         if float(np.sum(np.exp(-rel / (hi + tol)))) >= target:
+#             break
+#         hi *= 2.0
+#     # Bisection within [lo, hi]
+#     for _ in range(50):
+#         mid = 0.5 * (lo + hi)
+#         Smid = float(np.sum(np.exp(-rel / (mid + tol))))
+#         if Smid < target:
+#             lo = mid
+#         else:
+#             hi = mid
+#         if hi - lo <= 1e-12 * (1.0 + hi):
+#             break
+
+#     sigma = 0.5 * (lo + hi)
+#     return float(sigma), np.exp(-rel / (sigma + tol))
 
 def find_sigma(dists, tol=1e-6):
     """
@@ -115,70 +262,120 @@ def find_sigma(dists, tol=1e-6):
     return sigma, dists_transformed
 
 
-def compute_sigmas_vectorized(dists, tol=1e-6, max_iter=50, jac_eps=1e-6):
-    """
-    Vectorized Newton's method to solve for sigma for each column of the distance matrix.
-
-    Args:
-        dists (np.ndarray): shape (k, n_points)
-        tol (float): convergence tolerance
-        max_iter (int): maximum iterations
-
-    Returns:
-        sigmas (np.ndarray): shape (n_points,)
-        dists_transformed (np.ndarray): shape (k, n_points)
-    """
-    k, n = dists.shape
-    rho = np.min(dists, axis=0)                 # (n,)
-    D = np.maximum(dists - rho, 0.0) + tol                # (k, n)
-    sigma = rho.copy()                              # initial guess
-
-    for _ in range(max_iter):
-        denom = sigma + tol                         # guaranteed ≥ tol
-        E = np.exp(-D / denom)                      # (k, n)
-        f = E.sum(axis=0) - np.log2(k)              # (n,)
-        if np.all(np.abs(f) < tol):
-            break
-        jac = (E * D).sum(axis=0) / (denom**2)      # (n,)
-        jac_safe = np.maximum(jac, jac_eps)         # avoid zero
-        sigma -= f / jac_safe                       # Newton update
-        sigma = np.maximum(sigma, tol)              # enforce σ ≥ tol
-
-    dists_transformed = np.exp(-D / (sigma + tol))
-    return sigma, dists_transformed
-
 
 def calculate_sigma(X0, d_embed=4, tol=1e-6, channelwise=True, verbose=False):
     """Given a matrix of time series, calculate the sigma for each time series.
 
     Args:
-        X0: (ntx, d) matrix of time series
-        d_embed: embedding dimension
-        tol: tolerance for simplex neighbors
-        channelwise: whether to embed each time series separately or not 
+        X0 (np.ndarray): (ntx, d) matrix of time series.
+        d_embed (int): Embedding dimension.
+        tol (float): Tolerance used in the simplex neighbors / sigma solve.
+        channelwise (bool): Whether to embed each time series separately.
+        verbose (bool): If True, prints progress every 10 channels.
 
     Returns:
-        all_sig: (ntx, d) matrix of sigmas if channelwise is True, otherwise 
-            (ntx, 1) matrix of sigmas
+        np.ndarray: If ``channelwise`` is True, shape (m, ntx + d_embed - 1) after
+            edge padding. If False, shape (1, ntx) (no padding), matching prior behavior.
     """
-    # print("Calculating sigma", flush=True)
     X = X0.squeeze().copy()
     if channelwise:
-        Xe = embed_ts(X, m=d_embed)
-        # print("Embedding complete", flush=True)
+        Xe = embed_ts(X, m=d_embed)  # (m, ntx, d_embed)
     else:
-        Xe = X[None, ...]
-    m, ntx, d_embed = Xe.shape[0], Xe.shape[1], Xe.shape[2]
-    all_sig = list()
+        Xe = X[None, ...]            # (1, ntx, d_embed)
+
+    m, ntx, _ = Xe.shape
+    k = min(ntx - 1, d_embed + 1)
+
+    # Collect all (k, ntx) neighbor distance blocks for each channel,
+    # then solve sigmas once for all columns in a single vectorized call.
+    dblocks = []
     for i, Xe_i in enumerate(Xe):
-        if i % 10 == 0:
-            if verbose: print(f"Calculating sigma for channel {i} of {m}", flush=True)
-        wgts, idx, sig = simplex_neighbors(Xe_i, k=min(ntx - 1, d_embed + 1), tol=tol)
-        all_sig.append(sig)
-    all_sig = np.array(all_sig)
+        if verbose and (i % 10 == 0):
+            print(f"Calculating sigma for channel {i} of {m}", flush=True)
+        idx, dists = neighbors_hnswlib(Xe_i, metric='euclidean', k=k)
+        # Drop self and transpose to (k, ntx) expected by the vectorized solver
+        dblocks.append(dists[:, 1:].T.astype(np.float32, copy=False))
+
+    # Stack distances across channels horizontally: (k, m*ntx)
+    D = np.concatenate(dblocks, axis=1)
+
+    # Single batched solve for all sigmas; we discard weights here
+    sig_all, _ = compute_sigmas_vectorized(D, tol=tol)
+
+    # Reshape back to per-channel layout
+    all_sig = sig_all.reshape(m, ntx)
+
     if channelwise:
+        # Match prior padding convention
         all_sig = np.pad(all_sig, [[0, 0], [0, d_embed - 1]], mode="edge")
+
     return all_sig
+
+
+# def calculate_sigma(X0, d_embed=4, tol=1e-6, channelwise=True, verbose=False):
+#     """Given a matrix of time series, calculate the sigma for each time series.
+
+#     Args:
+#         X0: (ntx, d) matrix of time series
+#         d_embed: embedding dimension
+#         tol: tolerance for simplex neighbors
+#         channelwise: whether to embed each time series separately or not 
+
+#     Returns:
+#         all_sig: (ntx, d) matrix of sigmas if channelwise is True, otherwise 
+#             (ntx, 1) matrix of sigmas
+#     """
+#     # print("Calculating sigma", flush=True)
+#     X = X0.squeeze().copy()
+#     if channelwise:
+#         Xe = embed_ts(X, m=d_embed)
+#         # print("Embedding complete", flush=True)
+#     else:
+#         Xe = X[None, ...]
+#     m, ntx, d_embed = Xe.shape[0], Xe.shape[1], Xe.shape[2]
+#     all_sig = list()
+#     for i, Xe_i in enumerate(Xe):
+#         if i % 10 == 0:
+#             if verbose: print(f"Calculating sigma for channel {i} of {m}", flush=True)
+#         wgts, idx, sig = simplex_neighbors(Xe_i, k=min(ntx - 1, d_embed + 1), tol=tol)
+#         all_sig.append(sig)
+#     all_sig = np.array(all_sig)
+#     if channelwise:
+#         all_sig = np.pad(all_sig, [[0, 0], [0, d_embed - 1]], mode="edge")
+#     return all_sig
+
+# def compute_sigmas_vectorized(dists, tol=1e-6, max_iter=50, jac_eps=1e-6):
+#     """
+#     Vectorized Newton's method to solve for sigma for each column of the distance matrix.
+
+#     Args:
+#         dists (np.ndarray): shape (k, n_points)
+#         tol (float): convergence tolerance
+#         max_iter (int): maximum iterations
+
+#     Returns:
+#         sigmas (np.ndarray): shape (n_points,)
+#         dists_transformed (np.ndarray): shape (k, n_points)
+#     """
+#     k, n = dists.shape
+#     rho = np.min(dists, axis=0)                 # (n,)
+#     D = np.maximum(dists - rho, 0.0) + tol                # (k, n)
+#     sigma = rho.copy()                              # initial guess
+
+#     for _ in range(max_iter):
+#         denom = sigma + tol                         # guaranteed ≥ tol
+#         E = np.exp(-D / denom)                      # (k, n)
+#         f = E.sum(axis=0) - np.log2(k)              # (n,)
+#         if np.all(np.abs(f) < tol):
+#             break
+#         jac = (E * D).sum(axis=0) / (denom**2)      # (n,)
+#         jac_safe = np.maximum(jac, jac_eps)         # avoid zero
+#         sigma -= f / jac_safe                       # Newton update
+#         sigma = np.maximum(sigma, tol)              # enforce σ ≥ tol
+
+#     dists_transformed = np.exp(-D / (sigma + tol))
+#     return sigma, dists_transformed
+
 
 
 def data_processing_inequality(M, i, j, k):
