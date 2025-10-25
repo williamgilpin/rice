@@ -148,7 +148,7 @@ def compute_sigmas_vectorized(dists, tol=1e-6, max_iter=50, jac_eps=1e-6):
     return sigma, dists_transformed
 
 
-def calculate_sigma(X0, d_embed=4, tol=1e-6, channelwise=True):
+def calculate_sigma(X0, d_embed=4, tol=1e-6, channelwise=True, verbose=False):
     """Given a matrix of time series, calculate the sigma for each time series.
 
     Args:
@@ -161,14 +161,18 @@ def calculate_sigma(X0, d_embed=4, tol=1e-6, channelwise=True):
         all_sig: (ntx, d) matrix of sigmas if channelwise is True, otherwise 
             (ntx, 1) matrix of sigmas
     """
+    # print("Calculating sigma", flush=True)
     X = X0.squeeze().copy()
     if channelwise:
         Xe = embed_ts(X, m=d_embed)
+        # print("Embedding complete", flush=True)
     else:
         Xe = X[None, ...]
     m, ntx, d_embed = Xe.shape[0], Xe.shape[1], Xe.shape[2]
     all_sig = list()
-    for Xe_i in Xe:
+    for i, Xe_i in enumerate(Xe):
+        if i % 10 == 0:
+            if verbose: print(f"Calculating sigma for channel {i} of {m}", flush=True)
         wgts, idx, sig = simplex_neighbors(Xe_i, k=min(ntx - 1, d_embed + 1), tol=tol)
         all_sig.append(sig)
     all_sig = np.array(all_sig)
