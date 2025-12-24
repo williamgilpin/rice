@@ -263,19 +263,22 @@ def find_sigma(dists, tol=1e-6):
 
 
 
-def calculate_sigma(X0, d_embed=4, tol=1e-6, channelwise=True, verbose=False):
-    """Given a matrix of time series, calculate the sigma for each time series.
+def calculate_sigma(X0, d_embed=4, tol=1e-6, channelwise=True, verbose=False, cols_per_batch=1_000_000):
+    """
+    Streaming (low-RAM) version of `calculate_sigma`. Avoids constructing D with shape (k, m*ntx).
 
     Args:
         X0 (np.ndarray): (ntx, d) matrix of time series.
         d_embed (int): Embedding dimension.
-        tol (float): Tolerance used in the simplex neighbors / sigma solve.
-        channelwise (bool): Whether to embed each time series separately.
+        tol (float): Tolerance for the sigma solve.
+        channelwise (bool): If True, embed each time series separately.
         verbose (bool): If True, prints progress every 10 channels.
+        cols_per_batch (int): Number of columns of D (i.e., time points across channels)
+            to solve per call to `compute_sigmas_vectorized`.
 
     Returns:
-        np.ndarray: If ``channelwise`` is True, shape (m, ntx + d_embed - 1) after
-            edge padding. If False, shape (1, ntx) (no padding), matching prior behavior.
+        np.ndarray: If channelwise, shape (m, ntx + d_embed - 1) after edge padding.
+                    If False, shape (1, ntx).
     """
     X = X0.squeeze().copy()
     if channelwise:
@@ -286,30 +289,79 @@ def calculate_sigma(X0, d_embed=4, tol=1e-6, channelwise=True, verbose=False):
     m, ntx, _ = Xe.shape
     k = min(ntx - 1, d_embed + 1)
 
-    # Collect all (k, ntx) neighbor distance blocks for each channel,
-    # then solve sigmas once for all columns in a single vectorized call.
-    dblocks = []
+    # Output (preallocate only the final result; never build the huge concatenation)
+    all_sig = np.empty((m, ntx), dtype=np.float32)
+
     for i, Xe_i in enumerate(Xe):
         if verbose and (i % 10 == 0):
             print(f"Calculating sigma for channel {i} of {m}", flush=True)
-        idx, dists = neighbors_hnswlib(Xe_i, metric='euclidean', k=k)
-        # Drop self and transpose to (k, ntx) expected by the vectorized solver
-        dblocks.append(dists[:, 1:].T.astype(np.float32, copy=False))
 
-    # Stack distances across channels horizontally: (k, m*ntx)
-    D = np.concatenate(dblocks, axis=1)
+        # neighbors for this channel only; drop self
+        _, dists = neighbors_hnswlib(Xe_i, metric="euclidean", k=k)
+        D_i = dists[:, 1:].T.astype(np.float32, copy=False)  # (k, ntx)
 
-    # Single batched solve for all sigmas; we discard weights here
-    sig_all, _ = compute_sigmas_vectorized(D, tol=tol)
+        # stream over time (columns) to cap peak memory
+        for j0 in range(0, ntx, cols_per_batch):
+            j1 = min(j0 + cols_per_batch, ntx)
+            sig_block, _ = compute_sigmas_vectorized(D_i[:, j0:j1], tol=tol)
+            all_sig[i, j0:j1] = sig_block
 
-    # Reshape back to per-channel layout
-    all_sig = sig_all.reshape(m, ntx)
+        # help GC early
+        del dists, D_i
 
     if channelwise:
-        # Match prior padding convention
         all_sig = np.pad(all_sig, [[0, 0], [0, d_embed - 1]], mode="edge")
 
     return all_sig
+
+
+# def calculate_sigma(X0, d_embed=4, tol=1e-6, channelwise=True, verbose=False):
+#     """Given a matrix of time series, calculate the sigma for each time series.
+
+#     Args:
+#         X0 (np.ndarray): (ntx, d) matrix of time series.
+#         d_embed (int): Embedding dimension.
+#         tol (float): Tolerance used in the simplex neighbors / sigma solve.
+#         channelwise (bool): Whether to embed each time series separately.
+#         verbose (bool): If True, prints progress every 10 channels.
+
+#     Returns:
+#         np.ndarray: If ``channelwise`` is True, shape (m, ntx + d_embed - 1) after
+#             edge padding. If False, shape (1, ntx) (no padding), matching prior behavior.
+#     """
+#     X = X0.squeeze().copy()
+#     if channelwise:
+#         Xe = embed_ts(X, m=d_embed)  # (m, ntx, d_embed)
+#     else:
+#         Xe = X[None, ...]            # (1, ntx, d_embed)
+
+#     m, ntx, _ = Xe.shape
+#     k = min(ntx - 1, d_embed + 1)
+
+#     # Collect all (k, ntx) neighbor distance blocks for each channel,
+#     # then solve sigmas once for all columns in a single vectorized call.
+#     dblocks = []
+#     for i, Xe_i in enumerate(Xe):
+#         if verbose and (i % 10 == 0):
+#             print(f"Calculating sigma for channel {i} of {m}", flush=True)
+#         idx, dists = neighbors_hnswlib(Xe_i, metric='euclidean', k=k)
+#         # Drop self and transpose to (k, ntx) expected by the vectorized solver
+#         dblocks.append(dists[:, 1:].T.astype(np.float32, copy=False))
+
+#     # Stack distances across channels horizontally: (k, m*ntx)
+#     D = np.concatenate(dblocks, axis=1)
+    
+#     # Single batched solve for all sigmas; we discard weights here
+#     sig_all, _ = compute_sigmas_vectorized(D, tol=tol)
+
+#     # Reshape back to per-channel layout
+#     all_sig = sig_all.reshape(m, ntx)
+
+#     if channelwise:
+#         # Match prior padding convention
+#         all_sig = np.pad(all_sig, [[0, 0], [0, d_embed - 1]], mode="edge")
+
+#     return all_sig
 
 
 # def calculate_sigma(X0, d_embed=4, tol=1e-6, channelwise=True, verbose=False):
@@ -474,6 +526,7 @@ class CausalDetection:
         max_library_size (int): Maximum library size to use for cross-mapping. Defaults 
             to None, in which case the number of library sizes equals the number of 
             timepoints
+        min_library_size (int): Minimum library size to use for cross-mapping. Defaults to 1
         minibatch (bool): Whether to use minibatch cross-mapping. Used for large datasets. 
             Defaults to False
         minibatch_size (int): Size of minibatch to use for cross-mapping. Defaults to 1000
@@ -500,6 +553,7 @@ class CausalDetection:
             verbose=True, 
             library_sizes=None, 
             max_library_size=None,
+            min_library_size=1,
             minibatch=False,
             minibatch_size=1000,
             store_intermediates=False, 
@@ -518,6 +572,7 @@ class CausalDetection:
         self.verbose = verbose
         self.library_sizes = library_sizes
         self.max_library_size = max_library_size
+        self.min_library_size = min_library_size
         self.minibatch = minibatch
         self.minibatch_size = minibatch_size
         self.store_intermediates = store_intermediates
@@ -657,7 +712,7 @@ class CausalDetection:
         if 4 * m * m * ntx < 5e8: # 500MB
             all_y_pred = np.zeros((m, m, ntx))
         else:
-            if self.verbose: print(f"Storing temporary file at {fname}", flush=True)
+            if self.verbose: print(f"Large array detected, storing temporary file at {fname}", flush=True)
             all_y_pred = np.memmap(
                 fname, 
                 dtype=np.float64, 
@@ -871,7 +926,11 @@ class CausalDetection:
         if self.library_sizes is None:
             if self.max_library_size is None:
                 # self.library_sizes = np.arange(1, int(np.floor(self.n  / (self.d_embed + 1))))[::-1]
-                self.library_sizes = np.unique((self.dilation_factor ** np.arange(0, int(np.floor(np.log(self.n  / (self.d_embed + 1))/np.log(self.dilation_factor))))).astype(int))[::-1]
+                max_factor = int(np.floor(np.log(self.n  / (self.d_embed + 1))/np.log(self.dilation_factor)))
+                min_factor = int(np.floor(np.log(self.min_library_size)/np.log(self.dilation_factor)))
+                self.library_sizes = np.unique((
+                    self.dilation_factor ** np.arange(min_factor, max_factor)
+                ).astype(int))[::-1]
             else:
                 self.library_sizes = np.unique(np.linspace(1, int(np.floor(self.n  / (self.d_embed + 1))), self.max_library_size).astype(int))[::-1]
         ## check that library sizes increase monotonically
@@ -887,7 +946,9 @@ class CausalDetection:
 
         ## Iterate over library sizes to test robustness of causal matrix
         Xe = embed_ts(X, m=self.d_embed)
-        # corr_stream = StreamingCorrelation(X.shape[1], lambda i: i)
+
+        if self.verbose: print(f"Fitting model with {len(self.library_sizes)} library sizes", flush=True)
+        print(self.library_sizes, flush=True)
         for i, stride in enumerate(self.library_sizes):
             
             if self.verbose:
@@ -902,7 +963,6 @@ class CausalDetection:
             else:
                 all_causmat[i] = self.compute_crossmap(Xe[:, subset_inds], y[:-(self.d_embed - 1)][subset_inds])
 
-            # corr_stream.update(all_causmat[i])
 
         if self.store_intermediates:
             self.ac = all_causmat.copy()

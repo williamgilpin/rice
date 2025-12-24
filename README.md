@@ -74,10 +74,13 @@ We do not discover strong (interventional) causality, in the sense of Pearl's do
 If you find this code useful, please consider citing our paper:
 
 ```bibtex
-@article{krieger2025rice,
-  title={Interpretable gene network inference with nonlinear causalitys},
-  author={Krieger, Madison Ski and Gilpin, William},
-  year={2025}
+@article{krieger2025interpretable,
+  title={Interpretable gene network inference with nonlinear causality},
+  author={Krieger, Madison S and Gilpin, William},
+  journal={bioRxiv},
+  pages={2025--09},
+  year={2025},
+  publisher={Cold Spring Harbor Laboratory}
 }
 ```
 
