@@ -526,6 +526,7 @@ class CausalDetection:
         max_library_size (int): Maximum library size to use for cross-mapping. Defaults 
             to None, in which case the number of library sizes equals the number of 
             timepoints
+        min_library_size (int): Minimum library size to use for cross-mapping. Defaults to 1
         minibatch (bool): Whether to use minibatch cross-mapping. Used for large datasets. 
             Defaults to False
         minibatch_size (int): Size of minibatch to use for cross-mapping. Defaults to 1000
@@ -552,6 +553,7 @@ class CausalDetection:
             verbose=True, 
             library_sizes=None, 
             max_library_size=None,
+            min_library_size=1,
             minibatch=False,
             minibatch_size=1000,
             store_intermediates=False, 
@@ -570,6 +572,7 @@ class CausalDetection:
         self.verbose = verbose
         self.library_sizes = library_sizes
         self.max_library_size = max_library_size
+        self.min_library_size = min_library_size
         self.minibatch = minibatch
         self.minibatch_size = minibatch_size
         self.store_intermediates = store_intermediates
@@ -923,7 +926,11 @@ class CausalDetection:
         if self.library_sizes is None:
             if self.max_library_size is None:
                 # self.library_sizes = np.arange(1, int(np.floor(self.n  / (self.d_embed + 1))))[::-1]
-                self.library_sizes = np.unique((self.dilation_factor ** np.arange(0, int(np.floor(np.log(self.n  / (self.d_embed + 1))/np.log(self.dilation_factor))))).astype(int))[::-1]
+                max_factor = int(np.floor(np.log(self.n  / (self.d_embed + 1))/np.log(self.dilation_factor)))
+                min_factor = int(np.floor(np.log(self.min_library_size)/np.log(self.dilation_factor)))
+                self.library_sizes = np.unique((
+                    self.dilation_factor ** np.arange(min_factor, max_factor)
+                ).astype(int))[::-1]
             else:
                 self.library_sizes = np.unique(np.linspace(1, int(np.floor(self.n  / (self.d_embed + 1))), self.max_library_size).astype(int))[::-1]
         ## check that library sizes increase monotonically
@@ -939,8 +946,9 @@ class CausalDetection:
 
         ## Iterate over library sizes to test robustness of causal matrix
         Xe = embed_ts(X, m=self.d_embed)
-        # corr_stream = StreamingCorrelation(X.shape[1], lambda i: i)
+
         if self.verbose: print(f"Fitting model with {len(self.library_sizes)} library sizes", flush=True)
+        print(self.library_sizes, flush=True)
         for i, stride in enumerate(self.library_sizes):
             
             if self.verbose:
@@ -955,7 +963,6 @@ class CausalDetection:
             else:
                 all_causmat[i] = self.compute_crossmap(Xe[:, subset_inds], y[:-(self.d_embed - 1)][subset_inds])
 
-            # corr_stream.update(all_causmat[i])
 
         if self.store_intermediates:
             self.ac = all_causmat.copy()
