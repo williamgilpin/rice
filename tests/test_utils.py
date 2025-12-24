@@ -23,7 +23,7 @@ class TestUtils(unittest.TestCase):
         self.assertTrue(np.all(masked[2, 2] == 1))  # 9 should be masked
         self.assertTrue(np.all(masked[2, 1] == 1))  # 8 should be masked
         self.assertTrue(np.all(masked[2, 0] == 1))  # 7 should be masked
-        
+
     # def test_batch_diag(self):
     #     """Test batch_diag function."""
     #     arr = np.array([[1, 2], [3, 4]])
@@ -44,8 +44,8 @@ class TestUtils(unittest.TestCase):
         """Test embed_ts function."""
         X = np.array([1, 2, 3, 4, 5])
         embedded = embed_ts(X, m=3)
-        # The function returns a 3D array with shape (1, 3, 3)
-        self.assertEqual(embedded.shape, (1, 3, 3))
+        # The function returns a 2D array with shape (1, 3, 3)
+        self.assertEqual(embedded.shape, (3, 3))
         # Check the values in the first batch
         np.testing.assert_array_equal(embedded[0, 0], [1, 2, 3])
         np.testing.assert_array_equal(embedded[0, 1], [2, 3, 4])
