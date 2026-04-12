@@ -27,6 +27,7 @@ pbmc68k.h5ad
 temp*
 *benchmark_datasets/*
 *benchmarks/benchmark_datasets/*
+CLAUDE.md
 
 # PyTorch checkpoints
 *.pth.tar
