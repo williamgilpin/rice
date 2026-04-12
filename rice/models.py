@@ -560,27 +560,29 @@ class CausalDetection:
             warnings.warn("Stride sizes must decrease monotonically. Sorting library sizes.")
             self.library_sizes = np.sort(self.library_sizes)[::-1]
 
-        all_causmat = np.zeros((len(self.library_sizes), X.shape[1], X.shape[1]))
-
         Xe = embed_ts(X, m=self.d_embed)
+        Y_full = y[:-(self.d_embed - 1)]
+        m = X.shape[1]
+        n_strides = len(self.library_sizes)
+
+        all_causmat = np.zeros((n_strides, m, m))
 
         if self.verbose:
-            print(f"Fitting model with {len(self.library_sizes)} library sizes", flush=True)
+            print(f"Fitting model with {n_strides} library sizes", flush=True)
             print(self.library_sizes, flush=True)
         for i, stride in enumerate(self.library_sizes):
-            
+
             if self.verbose:
-                progress_bar(i, len(self.library_sizes))
+                progress_bar(i, n_strides)
 
             subset_inds = np.arange(0, Xe.shape[1], stride)
-            if self.minibatch and Xe[:, ::stride].shape[1] > self.minibatch_size:
+            if self.minibatch and len(subset_inds) > self.minibatch_size:
                 subset_inds = subset_inds[:self.minibatch_size]
-                
-            if self.ensemble:
-                all_causmat[i] = self.compute_crossmap_ensemble(Xe[:, subset_inds], y[:-(self.d_embed - 1)][subset_inds])
-            else:
-                all_causmat[i] = self.compute_crossmap(Xe[:, subset_inds], y[:-(self.d_embed - 1)][subset_inds])
 
+            if self.ensemble:
+                all_causmat[i] = self.compute_crossmap_ensemble(Xe[:, subset_inds], Y_full[subset_inds])
+            else:
+                all_causmat[i] = self.compute_crossmap(Xe[:, subset_inds], Y_full[subset_inds])
 
         if self.store_intermediates:
             self.ac = all_causmat.copy()
