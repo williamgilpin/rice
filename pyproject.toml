@@ -17,9 +17,9 @@ dependencies = ["numpy", "scipy", "scikit-learn",  "hnswlib"]
 
 # Optional dependencies
 [project.optional-dependencies]
-benchmarks = ["anndata"]
+benchmarks = ["pandas", "tqdm", "yellowbrick @ git+https://github.com/DistrictDataLabs/yellowbrick.git@28d6fa4a54ed0a80f64ae75267b6f7e84c92e9e0", "requests"]
 tests = ["matplotlib"]
-extra = ["scikit-learn"]
+scanpy = ["scanpy", "anndata"]
 
 # Package data
 [tool.setuptools]

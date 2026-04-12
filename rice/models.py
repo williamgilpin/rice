@@ -1,99 +1,24 @@
 import numpy as np
 import warnings
 import os
-import uuid
+import tempfile
 
-# from scipy.spatial.distance import cdist
 from sklearn.neighbors import NearestNeighbors
-from scipy.stats import pearsonr, spearmanr
 from scipy.special import betainc
-
-from .utils import embed_ts, multivariate_embed_ts
-from .utils import batch_pearson, batch_spearman, flatten_along_axis, StreamingCorrelation
-from .utils import progress_bar, debug_print
-from .utils import hollow_matrix, banded_matrix, max_linear_correlation_ridge
-
-## Disable optimization warnings
-import warnings
 from sklearn.exceptions import ConvergenceWarning
+
+from .utils import embed_ts
+from .utils import batch_pearson, batch_spearman
+from .utils import progress_bar
+
+import hnswlib
+
 warnings.filterwarnings("ignore", message="The iteration is not making good progress")
 warnings.filterwarnings("ignore", message="overflow encountered")
 warnings.filterwarnings('ignore', message='Forecast type not recognized')
 warnings.filterwarnings("ignore", category=ConvergenceWarning)
 
-## Where to write temporary files
-temp_dir = ""
-
 relu = lambda x: np.maximum(0, x)
-# from umap.umap_ import fuzzy_simplicial_set
-
-import hnswlib
-# def neighbors_hnswlib(X, metric='euclidean', k=20):
-#     """
-#     Use hnswlib for approximate k-nearest neighbors of each point in a dataset.
-#     Returns the indices and distances of the neighbors.
-
-#     Args:
-#         X (np.ndarray): dataset of shape (n, d)
-#         metric (str): distance metric to use
-#         k (int): number of nearest neighbors to use in the distance calculation
-
-#     Returns:
-#         idx (np.ndarray): indices of the neighbors
-#         dists (np.ndarray): distances to the neighbors
-#     """
-#     n, d = X.shape
-#     if metric == 'euclidean':
-#         metric = 'l2'
-#     elif metric == 'cosine':
-#         metric = 'cosine'
-#     else:
-#         raise ValueError(f"Metric {metric} not supported")
-
-#     # Initialize the HNSW index: space='l2' for Euclidean, 'cosine' for angular distance
-#     index = hnswlib.Index(space=metric, dim=d)
-#     # Prepare index to hold n elements; tune M and ef_construction as desired
-#     index.init_index(max_elements=n, M=12, ef_construction=200)
-#     # Add all vectors (cast to float32) with integer labels 0…n−1
-#     index.add_items(X, np.arange(n))
-#     # Set query-time parameter for recall/speed trade-off
-#     # index.set_ef(200)
-#     # Perform k+1 neighbor queries for each point
-#     idx, dists = index.knn_query(X, k+1) # Both are (n, k+1)
-#     if metric == 'l2':
-#         dists = np.sqrt(dists)
-#     return idx, dists
-
-
-# def simplex_neighbors(X, metric='euclidean', k=20, tol=1e-6):
-#     """
-#     Compute the distance between points in a dataset using the simplex distance metric.
-
-#     Args:
-#         X (np.ndarray): dataset of shape (n, d)
-#         metric (str): distance metric to use
-#         k (int): number of nearest neighbors to use in the distance calculation
-#         tol (float): tolerance for the distance calculation
-
-#     Returns:
-#         np.ndarray: distance matrix of shape (n, m)
-
-#     """
-
-#     idx, dists = neighbors_hnswlib(X, metric, k)
-
-#     dists, idx = dists[:, 1:].T, idx[:, 1:].T
-    
-#     rhos = dists[0]
-#     sigmas = np.array([find_sigma(drow, tol=tol)[0] for drow in dists.T])
-#     sigmas += tol # Add a small tolerance to avoid division by zero
-
-#     # sigmas, dists_transformed = compute_sigmas_vectorized(dists, tol=1e-6)
-
-#     wgts = np.exp(-relu(dists - rhos[None, :]) / sigmas[None, :])
-#     return wgts, idx, sigmas
-
-
 
 
 def neighbors_hnswlib(X, metric='euclidean', k=20):
@@ -163,8 +88,9 @@ def compute_sigmas_vectorized(dists, tol=1e-6, grid_points=48):
     sig_lo = sg[j_lo]
     sig_hi = sg[j_hi]
 
-    # Secant interpolation inside the bracket
+    # Secant interpolation inside the bracket, clamped to stay positive
     sigmas = sig_lo + (target - S_lo) * (sig_hi - sig_lo) / (S_hi - S_lo + 1e-12)
+    sigmas = np.maximum(sigmas, tol)
 
     # Compute final weights with the solved sigmas
     weights = np.exp(-A / (sigmas[None, :] + tol))
@@ -189,78 +115,6 @@ def simplex_neighbors(X, metric='euclidean', k=20, tol=1e-6):
     dists, idx = dists[:, 1:].T, idx[:, 1:].T
     sigmas, wgts = compute_sigmas_vectorized(dists, tol=tol)
     return wgts, idx, sigmas
-
-    
-
-# def find_sigma(dists, tol=1e-6):
-#     """
-#     Given a list of distances to k nearest neighbors, find the sigma for each point
-
-#     Args:
-#         dists (np.ndarray): A matrix of shape (k,)
-#         tol (float): The tolerance for the sigma
-
-#     Returns:
-#         float: The sigma corresponding to the neighborhood scale
-#         np.ndarray: The transformed distances
-#     """
-#     d = np.asarray(dists, dtype=np.float64)
-#     k = d.size
-#     rho = float(np.min(d))
-#     rel = np.maximum(d - rho, 0.0)
-#     target = np.log2(k)
-
-#     # Degenerate: all neighbors at rho -> S(σ) == k for all σ; best nonnegative σ is 0
-#     if np.all(rel == 0):
-#         sigma = 0.0
-#         return sigma, np.ones_like(d, dtype=np.float64)
-
-#     # If S(0) already ≥ target, the minimum feasible σ is 0
-#     S0 = float(np.sum(np.exp(-rel / max(tol, 1e-12))))
-#     if S0 >= target:
-#         sigma = 0.0
-#         return sigma, np.exp(-rel / max(tol, 1e-12))
-
-#     # Find a bracketing hi with S(hi) ≥ target (S is monotone increasing in σ)
-#     lo, hi = 0.0, max(rel.max(), tol)
-#     for _ in range(64):
-#         if float(np.sum(np.exp(-rel / (hi + tol)))) >= target:
-#             break
-#         hi *= 2.0
-#     # Bisection within [lo, hi]
-#     for _ in range(50):
-#         mid = 0.5 * (lo + hi)
-#         Smid = float(np.sum(np.exp(-rel / (mid + tol))))
-#         if Smid < target:
-#             lo = mid
-#         else:
-#             hi = mid
-#         if hi - lo <= 1e-12 * (1.0 + hi):
-#             break
-
-#     sigma = 0.5 * (lo + hi)
-#     return float(sigma), np.exp(-rel / (sigma + tol))
-
-def find_sigma(dists, tol=1e-6):
-    """
-    Given a list of distances to k nearest neighbors, find the sigma for each point
-
-    Args:
-        dists (np.ndarray): A matrix of shape (k,)
-        tol (float): The tolerance for the sigma
-
-    Returns:
-        float: The sigma corresponding to the neighborhood scale
-        np.ndarray: The transformed distances
-    """
-    k = dists.shape[0]
-    rho = np.min(dists)
-    func = lambda sig: sum(np.exp(-relu(dists - rho) / (sig + tol))) - np.log2(k)
-    jac = lambda sig: sum(np.exp(-relu(dists - rho) / (sig + tol)) * relu(dists - rho)) / (sig + tol)**2
-    sigma = fsolve(func, rho, fprime=jac, xtol=tol)[0]
-    dists_transformed = np.exp(-relu(dists - rho) / (sigma + tol))
-    return sigma, dists_transformed
-
 
 
 def calculate_sigma(X0, d_embed=4, tol=1e-6, channelwise=True, verbose=False, cols_per_batch=1_000_000):
@@ -313,121 +167,6 @@ def calculate_sigma(X0, d_embed=4, tol=1e-6, channelwise=True, verbose=False, co
         all_sig = np.pad(all_sig, [[0, 0], [0, d_embed - 1]], mode="edge")
 
     return all_sig
-
-
-# def calculate_sigma(X0, d_embed=4, tol=1e-6, channelwise=True, verbose=False):
-#     """Given a matrix of time series, calculate the sigma for each time series.
-
-#     Args:
-#         X0 (np.ndarray): (ntx, d) matrix of time series.
-#         d_embed (int): Embedding dimension.
-#         tol (float): Tolerance used in the simplex neighbors / sigma solve.
-#         channelwise (bool): Whether to embed each time series separately.
-#         verbose (bool): If True, prints progress every 10 channels.
-
-#     Returns:
-#         np.ndarray: If ``channelwise`` is True, shape (m, ntx + d_embed - 1) after
-#             edge padding. If False, shape (1, ntx) (no padding), matching prior behavior.
-#     """
-#     X = X0.squeeze().copy()
-#     if channelwise:
-#         Xe = embed_ts(X, m=d_embed)  # (m, ntx, d_embed)
-#     else:
-#         Xe = X[None, ...]            # (1, ntx, d_embed)
-
-#     m, ntx, _ = Xe.shape
-#     k = min(ntx - 1, d_embed + 1)
-
-#     # Collect all (k, ntx) neighbor distance blocks for each channel,
-#     # then solve sigmas once for all columns in a single vectorized call.
-#     dblocks = []
-#     for i, Xe_i in enumerate(Xe):
-#         if verbose and (i % 10 == 0):
-#             print(f"Calculating sigma for channel {i} of {m}", flush=True)
-#         idx, dists = neighbors_hnswlib(Xe_i, metric='euclidean', k=k)
-#         # Drop self and transpose to (k, ntx) expected by the vectorized solver
-#         dblocks.append(dists[:, 1:].T.astype(np.float32, copy=False))
-
-#     # Stack distances across channels horizontally: (k, m*ntx)
-#     D = np.concatenate(dblocks, axis=1)
-    
-#     # Single batched solve for all sigmas; we discard weights here
-#     sig_all, _ = compute_sigmas_vectorized(D, tol=tol)
-
-#     # Reshape back to per-channel layout
-#     all_sig = sig_all.reshape(m, ntx)
-
-#     if channelwise:
-#         # Match prior padding convention
-#         all_sig = np.pad(all_sig, [[0, 0], [0, d_embed - 1]], mode="edge")
-
-#     return all_sig
-
-
-# def calculate_sigma(X0, d_embed=4, tol=1e-6, channelwise=True, verbose=False):
-#     """Given a matrix of time series, calculate the sigma for each time series.
-
-#     Args:
-#         X0: (ntx, d) matrix of time series
-#         d_embed: embedding dimension
-#         tol: tolerance for simplex neighbors
-#         channelwise: whether to embed each time series separately or not 
-
-#     Returns:
-#         all_sig: (ntx, d) matrix of sigmas if channelwise is True, otherwise 
-#             (ntx, 1) matrix of sigmas
-#     """
-#     # print("Calculating sigma", flush=True)
-#     X = X0.squeeze().copy()
-#     if channelwise:
-#         Xe = embed_ts(X, m=d_embed)
-#         # print("Embedding complete", flush=True)
-#     else:
-#         Xe = X[None, ...]
-#     m, ntx, d_embed = Xe.shape[0], Xe.shape[1], Xe.shape[2]
-#     all_sig = list()
-#     for i, Xe_i in enumerate(Xe):
-#         if i % 10 == 0:
-#             if verbose: print(f"Calculating sigma for channel {i} of {m}", flush=True)
-#         wgts, idx, sig = simplex_neighbors(Xe_i, k=min(ntx - 1, d_embed + 1), tol=tol)
-#         all_sig.append(sig)
-#     all_sig = np.array(all_sig)
-#     if channelwise:
-#         all_sig = np.pad(all_sig, [[0, 0], [0, d_embed - 1]], mode="edge")
-#     return all_sig
-
-# def compute_sigmas_vectorized(dists, tol=1e-6, max_iter=50, jac_eps=1e-6):
-#     """
-#     Vectorized Newton's method to solve for sigma for each column of the distance matrix.
-
-#     Args:
-#         dists (np.ndarray): shape (k, n_points)
-#         tol (float): convergence tolerance
-#         max_iter (int): maximum iterations
-
-#     Returns:
-#         sigmas (np.ndarray): shape (n_points,)
-#         dists_transformed (np.ndarray): shape (k, n_points)
-#     """
-#     k, n = dists.shape
-#     rho = np.min(dists, axis=0)                 # (n,)
-#     D = np.maximum(dists - rho, 0.0) + tol                # (k, n)
-#     sigma = rho.copy()                              # initial guess
-
-#     for _ in range(max_iter):
-#         denom = sigma + tol                         # guaranteed ≥ tol
-#         E = np.exp(-D / denom)                      # (k, n)
-#         f = E.sum(axis=0) - np.log2(k)              # (n,)
-#         if np.all(np.abs(f) < tol):
-#             break
-#         jac = (E * D).sum(axis=0) / (denom**2)      # (n,)
-#         jac_safe = np.maximum(jac, jac_eps)         # avoid zero
-#         sigma -= f / jac_safe                       # Newton update
-#         sigma = np.maximum(sigma, tol)              # enforce σ ≥ tol
-
-#     dists_transformed = np.exp(-D / (sigma + tol))
-#     return sigma, dists_transformed
-
 
 
 def data_processing_inequality(M, i, j, k):
@@ -507,8 +246,6 @@ def filter_loops(M0, max_neighbors=100):
 
     return M
 
-from scipy.optimize import fsolve, minimize_scalar
-from sklearn.linear_model import LassoCV, MultiTaskLassoCV, MultiTaskElasticNetCV
 
 class CausalDetection:
     """
@@ -630,30 +367,22 @@ class CausalDetection:
                 wgts = np.exp(-dists / dmin) # (k, nt) weights of k neighbors for each point
 
             if self.forecast == "smap":
-                # print(wgts.shape, idx.shape)
-                Ax = (Xe[:, idx.T, :1] * wgts.T[None, ..., None]).squeeze().copy()  # Input batch matrix (B x T x M)
-                Ay = (Y[:, idx.T] * wgts.T[None, ..., None]).squeeze().copy()  # Input batch matrix (B x T x M)
-                Cx = Xe[:, :idx.shape[1], 0].squeeze().copy()  # Target batch matrix (B x T)
-                Cy = Y[:, :idx.shape[1], 0].squeeze().copy() # Not used. Target batch matrix (B x T)
-                M = Ax.shape[2] # Number of features
-                lambda_reg = 0.5 * M # Scale regularization parameter to the number of features
-                I = np.eye(M)[None, :, :]  # Identity matrix broadcasted across batches (B x M x M)
-                AtA = np.einsum('btm,btn->bmn', Ax, Ax)  ## Compute A^T @ A over batch (B x M x M) --> (B x M x M)
-                AtC = np.einsum('btm,bt->bm', Ax, Cx)    ## Compute A^T @ C over batch (B x M) --> (B x M)
-                B_sol = np.linalg.solve(AtA + lambda_reg * I, AtC[:, :, None])  # Solve (B x M x 1)
-                B_sol = B_sol.squeeze(-1)  # Final shape (B x M)
-                # B_sol = np.ones_like(B_sol)
-                y_pred = np.einsum('btm,bm->bt', Ay, B_sol) ## Predict Y with the B coeffs fit from X
+                Ax = (Xe[:, idx.T, :1] * wgts.T[None, ..., None]).squeeze(-1).copy()  # (B, T, k)
+                Ay = (Y[:, idx.T] * wgts.T[None, ..., None]).squeeze(-1).copy()  # (B, T, k)
+                Cx = Xe[:, :idx.shape[1], 0].copy()  # (B, T)
+                M = Ax.shape[2]
+                lambda_reg = 0.5 * M
+                I = np.eye(M)[None, :, :]
+                AtA = np.einsum('btm,btn->bmn', Ax, Ax)
+                AtC = np.einsum('btm,bt->bm', Ax, Cx)
+                B_sol = np.linalg.solve(AtA + lambda_reg * I, AtC[:, :, None]).squeeze(-1)
+                y_pred = np.einsum('btm,bm->bt', Ay, B_sol)
                 y_target = Y[:, :y_pred.shape[1], 0].copy()
             else:
                 if self.forecast != "sum":
                     warnings.warn("Forecast type not recognized, falling back to sum over neighbors")
-                y_pred = np.sum(Y[:, idx.T] * wgts.T[None, ..., None], axis=2)
-                y_pred, y_target = y_pred[:, :, 0].copy(), Y[:, :y_pred.shape[1], 0].copy()
-
-                y_pred = np.sum(Y[:, idx.T] * wgts.T[None, ..., None], axis=2)
-                y_target = Y[:, :y_pred.shape[1], :].copy()
-                y_pred, y_target = np.squeeze(y_pred), np.squeeze(y_target)
+                y_pred = np.sum(Y[:, idx.T] * wgts.T[None, ..., None], axis=2).squeeze(-1)
+                y_target = Y[:, :y_pred.shape[1], 0].copy()
 
             ## Score the prediction, weighted by the p-value
             rho, pval = batch_pearson(y_pred, y_target, pvalue=True)
@@ -663,18 +392,6 @@ class CausalDetection:
                 causal_matrix[pval > self.significance_threshold] = 0
 
             causal_matrix[i] = rho.copy() * (1 - pval)
-
-        ## Fully vectorized triggers memory error
-        # idx = np.argsort(dX, axis=1)[:, 1:self.k+1]
-        # dists = np.sort(dX, axis=1)[:, 1:self.k+1]
-        # wgts = np.exp(-dists / np.min(dists, axis=1, keepdims=True))
-        # Xe_sel = np.moveaxis(Xe[:, idx.T], (0,1,2,3,4), (1,2,3,0,4))
-        # y_pred = np.sum(Xe_sel * np.swapaxes(np.swapaxes(wgts, 1, 2)[None, ..., None], 0, 1), axis=3)
-        # y_true = Xe.copy()
-        # ytc = y_true - np.mean(y_true, axis=-1, keepdims=True)
-        # ypc = y_pred - np.mean(y_pred, axis=-1, keepdims=True)
-        # rho = np.sum(ytc * ypc, axis=-1) / np.sqrt(np.sum(ytc ** 2, axis=-1) * np.sum(ypc ** 2, axis=-1))
-        # causal_matrix = np.mean(rho.copy(), axis=-1)
 
         np.fill_diagonal(causal_matrix, 0)
         return causal_matrix
@@ -693,57 +410,37 @@ class CausalDetection:
                 the entire time series is used
             tpred (int): Timepoint to predict. Defaults to 0, in which case the last timepoint
                 is predicted
-
-        Can modify to hold out test
         """
-        # print("a", flush=True)
         m, ntx, d_embed = Xe.shape[0], Xe.shape[1], Xe.shape[2]
         nt = Y.shape[0]
         if len(Y.shape) < 3:
             Y = Y.T[..., None] # (n_genes, nt, 1)
         else:
             Y = Y.T
-        # print("b", flush=True)
-        # all_y_pred = np.zeros((m, m, ntx))
 
-        ## If the prediction array would be larger than 500MB, store in a temporary file
-        hash_id = uuid.uuid4().hex
-        fname = os.path.join(temp_dir, f"temp_rice_{hash_id}.npy")
-        if 4 * m * m * ntx < 5e8: # 500MB
+        ## If the prediction array would be larger than 500MB, use a memmap backed
+        ## by a temporary file.  Unlinking immediately ensures the OS reclaims disk
+        ## space when the process exits, even on crash or interrupt.
+        _tmp_fd = None
+        if 8 * m * m * ntx < 5e8:
             all_y_pred = np.zeros((m, m, ntx))
         else:
-            if self.verbose: print(f"Large array detected, storing temporary file at {fname}", flush=True)
+            _tmp_fd, _tmp_path = tempfile.mkstemp(suffix=".npy", prefix="rice_")
+            os.close(_tmp_fd)
+            if self.verbose: print(f"Large array detected, using temporary memmap", flush=True)
             all_y_pred = np.memmap(
-                fname, 
-                dtype=np.float64, 
-                mode="w+", 
-                shape=(m, m, ntx)
+                _tmp_path, dtype=np.float64, mode="w+", shape=(m, m, ntx)
             )
-        
-        # hash_id = uuid.uuid4().hex
-        # fname = os.path.join(temp_dir, f"temp_rice_{hash_id}.npy") # 1GB
-        # if self.verbose: print(f"Storing temporary file at {fname}", flush=True)
-        # all_y_pred = np.memmap(
-        #     fname, 
-        #     dtype=np.float64, 
-        #     mode="w+", 
-        #     shape=(m, m, ntx)
-        # )
+            os.unlink(_tmp_path)  # safe on Unix: data lives until memmap is GC'd
 
         k = min(ntx - 1, self.k)
         causal_matrix = np.zeros((m, m))
-        # I = np.eye(m, dtype=Xe.dtype)[None, :, :]       # shape (M, M), not (B, M, M)
         I = np.eye(k)[None, :, :]
-        # print("c", flush=True)
-        lambda_reg = 0.5 * m * 100000 # Scale regularization parameter to the number of features
-        
-        # print("d", flush=True)
-        ## Outer index runs over causes, which we use for lookups into the downstream
-        ## causees. 
+        lambda_reg = 0.5 * m * 100000
+
         y_target = Y[:, :ntx, 0].copy()
         for i in range(m):
             if self.neighbors == "simplex":
-                ## This is the slow step
                 wgts, idx, sig = simplex_neighbors(Xe[i], k=k, tol=tol)
             else:
                 if self.neighbors != "knn":
@@ -752,134 +449,60 @@ class CausalDetection:
                 tree.fit(Xe[i])
                 dists, idx  = tree.kneighbors(Xe[i])
                 dists, idx = dists[:, 1:].T, idx[:, 1:].T # Remove self distance
-                dmin = np.min(dists, axis=0)
+                dmin = np.min(dists, axis=0) + 1e-8
                 wgts = np.exp(-dists / dmin) # (k, nt) weights of k neighbors for each point
 
-            ## Regularized smap often seems to overfit
             if self.forecast == "smap":
+                Ax = (Xe[:, idx.T, :1] * wgts.T[None, ..., None]).squeeze(-1)  # (B, T, k)
+                Ay = (Y[:, idx.T] * wgts.T[None, ..., None]).squeeze(-1)  # (B, T, k)
+                Cx = Xe[:, :idx.shape[1], 0].copy()  # (B, T)
 
-                # ## toggle here 
-                Ax = (Xe[:, idx.T, :1] * wgts.T[None, ..., None]).squeeze()  # Input batch matrix (B x T x M)
-                Ay = (Y[:, idx.T] * wgts.T[None, ..., None]).squeeze()  # Input batch matrix (B x T x M)
-                Cx = Xe[:, :idx.shape[1], 0].squeeze().copy()  # Target batch matrix (B x T)
-                # # Cy = Y[:, :idx.shape[1], 0].squeeze().copy() # Not used. Target batch matrix (B x T)
-                
-                # AtA = np.einsum('btm,btn->bmn', Ax, Ax)  ## Compute A^T @ A over batch (B x M x M) --> (B x M x M)
-                # AtC = np.einsum('btm,bt->bm', Ax, Cx)    ## Compute A^T @ C over batch (B x M) --> (B x M)
-                AtA = Ax.transpose(0, 2, 1) @ Ax  # This is equivalent to the first einsum
-                AtC = (Ax.transpose(0, 2, 1) @ Cx[..., None]).squeeze(-1)  # This is equivalent to the second einsum
-                # print(Ax.shape, Ay.shape, Cx.shape, AtA.shape, AtC.shape, flush=True)
-
-                # inverse = np.linalg.inv(AtA + lambda_reg * I)
-                # B_sol = np.einsum('bmn,bm->bn', inverse, AtC)[:, :, None]
-                # B_sol = B_sol.squeeze(-1)  # Final shape (B x M)
-
+                AtA = Ax.transpose(0, 2, 1) @ Ax
+                AtC = (Ax.transpose(0, 2, 1) @ Cx[..., None]).squeeze(-1)
                 B_sol = np.linalg.solve(AtA + lambda_reg * I, AtC[:, :, None]).squeeze(-1)
-                y_pred = np.einsum('btm,bm->bt', Ay, B_sol) ## Predict Y with the B coeffs fit from X
-                ## Include all context points
-                # y_pred = flatten_along_axis((Ay * B_sol[:, None]).squeeze(), (0, 2)).T
-
+                y_pred = np.einsum('btm,bm->bt', Ay, B_sol)
             else:
                 if self.forecast != "sum":
                     warnings.warn("Forecast type not recognized, falling back to sum over neighbors")
-                y_pred = np.sum(Y[:, idx.T] * wgts.T[None, ..., None], axis=2)
-                y_pred, y_target = y_pred[:, :, 0].copy(), Y[:, :y_pred.shape[1], 0].copy()
-                y_pred = np.sum(Y[:, idx.T] * wgts.T[None, ..., None], axis=2)
-                y_target = Y[:, :y_pred.shape[1], :].copy()
-                y_pred, y_target = np.squeeze(y_pred), np.squeeze(y_target)
+                y_pred = np.sum(Y[:, idx.T] * wgts.T[None, ..., None], axis=2).squeeze(-1)
+                y_target = Y[:, :y_pred.shape[1], 0].copy()
 
             all_y_pred[i] = y_pred
 
-        # For each response, fit a ridge regression model over timepoints
-        # To assign a causal score to each upstream gene
-        ## This might be the bottleneck when stride gets close to 1
-        # for i in range(m):
-
-        #     # Loop over responses
-        #     Xd, Yd = all_y_pred[:, i].T,  y_target[i][:, None] # sweep downstreams
-        #     # Xd, Yd = all_y_pred[i].T, all_y_true[i][:, None] # sweep upstreams
-           
-        #     Xd = (Xd - np.mean(Xd, axis=0, keepdims=True))
-        #     Yd = (Yd - np.mean(Yd, axis=0, keepdims=True))
-        #     # print("2", flush=True)
-
-        #     # lambda_val = 1e0 / Xd.shape[1] * 1e10
-        #     # ridge = Ridge(alpha=lambda_val, fit_intercept=False)
-        #     # ridge.fit(Xd, Yd)
-        #     # Yd_pred = ridge.predict(Xd) # error doesn't distinguish upstream
-        #     # corr = pearsonr(Yd_pred.squeeze(), Yd.squeeze())
-        #     # corr = corr[0] * (1 - corr[1])
-        #     # r2 = corr
-        #     # A = ridge.coef_.T.squeeze()
-        #     # A = np.abs(A)
-        #     # A *= r2
-
-        #     ## Strong regularization limit
-        #     A = (Xd.T @ Yd).T
-        #     # print("3", flush=True)
-        #     Yd_pred = Xd @ A.T
-        #     # print("4", flush=True)
-        #     corr = pearsonr(Yd_pred.squeeze(), Yd.squeeze())
-        #     # print("5", flush=True)
-        #     corr = corr[0] * (1 - corr[1])
-        #     # print("6", flush=True)
-        #     # corr = np.nan_to_num(corr, nan=1.0) # constant time series no variance
-        #     r2 = corr 
-        #     # print("7", flush=True)
-        #     A = np.abs(A)
-        #     # print("8", flush=True)
-        #     A *= r2
-        #     # print("9", flush=True)
-        #     causal_matrix[:, i] = A.squeeze()
-        
-
+        # Score each response gene: fit covariance model across upstream predictions
         for i in range(m):
-            # First pass: compute sums for means, inner products, and Y variance
-            n = 0
-            sum_x = np.zeros(m)
-            sum_y = 0.0
-            sum_y2 = 0.0
-            sum_xy = np.zeros(m)
+            # X_pred[:, t] are the cross-mapped predictions for response gene i
+            # from each upstream gene, y_vec[t] is the actual value
+            X_pred = all_y_pred[:, i, :]          # (m, ntx)
+            y_vec = y_target[i]                    # (ntx,)
 
-            for t in range(ntx):
-                x = all_y_pred[:, i, t]       # shape (m,)
-                y = y_target[i][t]            # scalar
-                n += 1
-                sum_x  += x
-                sum_y  += y
-                sum_y2 += y*y
-                sum_xy += x * y
+            mu_x = X_pred.mean(axis=1)             # (m,)
+            mu_y = y_vec.mean()                    # scalar
 
-            mu_x = sum_x / n
-            mu_y = sum_y / n
+            # A_j = cov(x_j, y) (unnormalized)
+            A = X_pred @ y_vec - ntx * mu_x * mu_y  # (m,)
 
-            # Cross‐product A_j = ∑ₜ (xₜⱼ − μₓⱼ)(yₜ − μᵧ)
-            A = sum_xy - n * mu_x * mu_y
+            # Variance of y
+            var_y = np.dot(y_vec, y_vec) - ntx * mu_y**2
 
-            # Variance of Y: ∑ₜ (yₜ − μᵧ)²
-            sum_y2c = sum_y2 - n * mu_y**2
+            # Predicted y_t = (x_t - mu_x)^T A for each timepoint
+            X_cent = X_pred - mu_x[:, None]        # (m, ntx)
+            y_hat = A @ X_cent                     # (ntx,)
+            y_cent = y_vec - mu_y                  # (ntx,)
 
-            # streaming Pearson correlation between predicted and actual Y
-            sum_pred2 = 0.0
-            sum_pred_y = 0.0
-            for t in range(ntx):
-                x = all_y_pred[:, i, t]
-                x_cent = x - mu_x
-                y_cent = y_target[i][t] - mu_y
-                y_pred = np.dot(x_cent, A)
-                sum_pred2  += y_pred**2
-                sum_pred_y += y_pred * y_cent
+            # Pearson r between y_hat and y
+            sum_pred2 = np.dot(y_hat, y_hat)
+            sum_pred_y = np.dot(y_hat, y_cent)
+            denom = np.sqrt(sum_pred2 * var_y)
+            r = sum_pred_y / denom if denom > 0 else 0.0
+            r = np.clip(r, -1.0, 1.0)
 
-            # Pearson r between Y_pred and Y, with exact p-value given by the beta distribution
-            r = sum_pred_y / np.sqrt(sum_pred2 * sum_y2c)
-            a = n / 2.0 - 1.0
+            a = ntx / 2.0 - 1.0
             pval = 2 * betainc(a, a, 0.5 * (1 - abs(r)))
             r2 = r * (1 - pval)
             causal_matrix[:, i] = np.abs(A) * r2
 
-        ## if temp_hashid.npy is on disk, delete it
-        if os.path.exists(fname):
-            os.remove(fname)
+        del all_y_pred  # release memmap (if any) so OS can reclaim space
 
         np.fill_diagonal(causal_matrix, 0)
         return causal_matrix
@@ -925,7 +548,6 @@ class CausalDetection:
 
         if self.library_sizes is None:
             if self.max_library_size is None:
-                # self.library_sizes = np.arange(1, int(np.floor(self.n  / (self.d_embed + 1))))[::-1]
                 max_factor = int(np.floor(np.log(self.n  / (self.d_embed + 1))/np.log(self.dilation_factor)))
                 min_factor = int(np.floor(np.log(self.min_library_size)/np.log(self.dilation_factor)))
                 self.library_sizes = np.unique((
@@ -938,17 +560,13 @@ class CausalDetection:
             warnings.warn("Stride sizes must decrease monotonically. Sorting library sizes.")
             self.library_sizes = np.sort(self.library_sizes)[::-1]
 
-        # ## If minibatch is enabled, only use library sizes that are less than the minibatch size
-        # if self.minibatch:
-        #     self.library_sizes = self.library_sizes[self.library_sizes < self.minibatch_size]
-
         all_causmat = np.zeros((len(self.library_sizes), X.shape[1], X.shape[1]))
 
-        ## Iterate over library sizes to test robustness of causal matrix
         Xe = embed_ts(X, m=self.d_embed)
 
-        if self.verbose: print(f"Fitting model with {len(self.library_sizes)} library sizes", flush=True)
-        print(self.library_sizes, flush=True)
+        if self.verbose:
+            print(f"Fitting model with {len(self.library_sizes)} library sizes", flush=True)
+            print(self.library_sizes, flush=True)
         for i, stride in enumerate(self.library_sizes):
             
             if self.verbose:
@@ -967,11 +585,7 @@ class CausalDetection:
         if self.store_intermediates:
             self.ac = all_causmat.copy()
 
-        # batch_spearman(np.random.randn(X.shape[1], X.shape[1], len(self.library_sizes)), pvalue=False)
-
-        # rho_mono = batch_pearson(all_causmat.T, pvalue=False) # Memory error when batch dimension is too large    
-        rho_mono = batch_spearman(all_causmat.T, pvalue=False) # Memory error when batch dimension is too large
-        # rho_mono = corr_stream.finalize()
+        rho_mono = batch_spearman(all_causmat.T, pvalue=False)
         np.fill_diagonal(rho_mono, 0)
         cause_matrix = all_causmat[-1] * np.abs(rho_mono)
 
@@ -980,7 +594,3 @@ class CausalDetection:
             cause_matrix = filter_loops(cause_matrix)
 
         return cause_matrix
-
-
-
-
