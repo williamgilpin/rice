@@ -1493,6 +1493,7 @@ dependencies = [
     { name = "scikit-learn", version = "1.8.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "seaborn" },
 ]
 
 [package.optional-dependencies]
@@ -1524,6 +1525,7 @@ requires-dist = [
     { name = "scanpy", marker = "extra == 'scanpy'" },
     { name = "scikit-learn" },
     { name = "scipy" },
+    { name = "seaborn", specifier = ">=0.13.2" },
     { name = "tqdm", marker = "extra == 'benchmarks'" },
     { name = "yellowbrick", marker = "extra == 'benchmarks'", git = "https://github.com/DistrictDataLabs/yellowbrick.git?rev=28d6fa4a54ed0a80f64ae75267b6f7e84c92e9e0" },
 ]
