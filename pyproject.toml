@@ -18,14 +18,13 @@ dependencies = [
     "scipy",
     "scikit-learn",
     "hnswlib",
-    "seaborn>=0.13.2",
 ]
 
 # Optional dependencies
 [project.optional-dependencies]
 benchmarks = ["pandas", "tqdm", "yellowbrick @ git+https://github.com/DistrictDataLabs/yellowbrick.git@28d6fa4a54ed0a80f64ae75267b6f7e84c92e9e0", "requests"]
 tests = ["matplotlib"]
-scanpy = ["scanpy", "anndata"]
+scanpy = ["scanpy", "anndata", "seaborn>=0.13.2"]
 
 # Package data
 [tool.setuptools]
