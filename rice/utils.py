@@ -495,6 +495,79 @@ def batch_pearson(x, y=None, pvalue=False, eps=1e-8):
 #         return corr, p_value
 #     return corr
 
+from scipy.stats import spearmanr, pearsonr, binned_statistic
+
+def binned_statistic_bootstrapped(x, values, statistic='mean', bins=10, range=None):
+    """
+    Compute a binned statistic of the input data with bootstrapping.
+    
+    Args:
+        x (array_like):  Input data to be binned.
+        values (array_like): Values to compute the statistic for.
+        statistic (str or callable, optional): The statistic to compute. Default is 'mean'.
+        bins (int or sequence of scalars, optional): The number of bins or the bin edges. Default is 10.
+        range (tuple, optional): The lower and upper range of the bins. Default is None.
+    
+    Returns:
+        bin_means (array_like): The computed binned means.
+        bin_errors (array_like): The bootstrapped errors for each bin.
+        bin_edges (array_like): The edges of the bins.
+        bin_number (array_like): The bin number for each value in x.
+    """
+    # Compute the binned statistic
+    bin_means, bin_edges, bin_number = binned_statistic(
+        x, values, statistic=statistic, bins=bins, range=range
+    )
+    
+    # Compute the bootstrapped errors
+    bin_errors = np.zeros_like(bin_means)
+    for i in np.arange(len(bin_means)):
+        bin_indices = np.where(bin_number == i)[0]
+        if len(bin_indices) > 0:
+            bootstrap_samples = np.random.choice(
+                values[bin_indices], size=(1000, len(bin_indices)), replace=True
+            )
+            bootstrap_means = np.mean(bootstrap_samples, axis=1)
+            bin_errors[i] = np.std(bootstrap_means)
+    
+    return bin_means, bin_errors, bin_edges, bin_number
+
+def pearsonr_excluded(x, y):
+    """Compute Pearson correlation excluding NaN values."""
+    x, y = np.asarray(x), np.asarray(y)
+    mask = ~np.isnan(x) & ~np.isnan(y)
+    return pearsonr(x[mask], y[mask])
+
+def spearmanr_binned(a, b, nbins=20, agg="mean", sort_on="x", **kwargs):
+    """A binned version of scipy's spearmanr function. This function accounts for
+    differences in the number of datapoints across value ranges in a dataset, thus
+    avoiding bias due to uneven sampling.
+
+    Args:
+        a (array-like): First variable to correlate.
+        b (array-like): Second variable to correlate.
+        nbins (int): Number of bins to use for binning the data.
+        agg (str): Aggregation function to use. Can be 'mean', 'median', or 'std'.
+        sort_on (str): Which variable to sort on before binning. Can be 'x' or 'y'.
+        **kwargs: Additional arguments to pass to scipy's spearmanr function.
+
+    Returns:
+        corr (scipy.stats.SpearmanrResult): Spearman correlation result object.
+    """
+    if sort_on == "x":
+        sort_idx = np.argsort(a)
+    else:
+        sort_idx = np.argsort(b)
+    a_sorted = a[sort_idx]
+    b_sorted = b[sort_idx]
+    bin_edges = np.linspace(a.min(), a.max(), nbins)
+    bin_means_a, edges_a, bin_number_a = binned_statistic(a_sorted, a_sorted, statistic=agg, bins=bin_edges)
+    bin_means_b, edges_b, bin_number_b = binned_statistic(a_sorted, b_sorted, statistic=agg, bins=bin_edges)
+
+    # corr = pearsonr_excluded(bin_means_a, bin_means_b, **kwargs)
+    corr = spearmanr(bin_means_a, bin_means_b, **kwargs)
+    return corr
+
 def batch_spearman(x, y=None, pvalue=False):
     """
     Calculate the Spearman correlation between two sets of time series along the
