@@ -298,6 +298,7 @@ class CausalDetection:
             forecast="smap",
             prune_indirect=False,
             ensemble=True,
+            signed=False,
             significance_threshold=None,
             dilation_factor=1.5,
             sweep_d_embed=False
@@ -318,6 +319,7 @@ class CausalDetection:
         self.forecast = forecast
         self.prune_indirect = prune_indirect
         self.ensemble = ensemble
+        self.signed = signed
         self.significance_threshold = significance_threshold
         self.dilation_factor = dilation_factor
         self.sweep_d_embed = sweep_d_embed
@@ -500,7 +502,10 @@ class CausalDetection:
             a = ntx / 2.0 - 1.0
             pval = 2 * betainc(a, a, 0.5 * (1 - abs(r)))
             r2 = r * (1 - pval)
-            causal_matrix[:, i] = np.abs(A) * r2
+            if self.signed:
+                causal_matrix[:, i] = A * r2
+            else:
+                causal_matrix[:, i] = np.abs(A) * r2
 
         del all_y_pred  # release memmap (if any) so OS can reclaim space
 
