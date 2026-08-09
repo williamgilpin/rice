@@ -250,9 +250,9 @@ def filter_loops(M0, max_neighbors=100):
 class CausalDetection:
     """
     Find the causal relationships among sets of univariate time series.
-    The i,j th element of the causal matrix denotes the degree to which i is caused by j
-    Equivalently, it measures how much the dynamics x_i is coupled to x_j via the
-    matrix sum_j A_{ij} x_j.
+    The i,j th element of the causal matrix denotes the degree to which i causes j.
+    The effects of a perturbation to the i-th time series on all other time series 
+        corresponds out causal_matrix[i, :].
 
     Attributes:
         d_embed (int): Number of dimensions to embed the time series into
