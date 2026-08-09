@@ -63,6 +63,20 @@ class TestCausalDetection(unittest.TestCase):
         # Check diagonal is zero
         np.testing.assert_array_equal(np.diag(causal_matrix), np.zeros(self.n_features))
 
+    def test_nonsymmmetric_causality(self):
+        """Test that causality is not symmetric."""
+        tt = np.linspace(0, 30, 3000)
+        x = np.sin(tt)
+        y = np.random.normal(0, 0.5, size=tt.shape)
+        z = np.tan(x) + np.random.normal(0, 0.5, size=tt.shape)
+        traj = np.vstack([x, y, z]).T
+
+        cd = CausalDetection()
+        causal_matrix = cd.fit(traj)
+
+        # Check that causality is not symmetric
+        self.assertGreater(causal_matrix[0, 2], causal_matrix[2, 0])
+
     def test_fit_with_different_forecast_methods(self):
         """Test fitting with different forecast methods."""
         # Test with sum forecast method
