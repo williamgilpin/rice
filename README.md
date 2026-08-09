@@ -22,6 +22,10 @@ The Riemannian Causal Embedding (RiCE) algorithm discovers causal relationships 
     scores = compute_metrics(adj_true, adj_pred)
     print(scores["AUPRC Multiplier"]) # AUPRC Multiplier > 32.0
     print(scores["ROC-AUC Multiplier"]) # ROC-AUC Multiplier > 1.0
+
+    # Predict the effects of a perturbation on gene 0
+    perturbed_gene = 0
+    predicted_effects = adj_pred[perturbed_gene] # first index is causal
 ```
 
 ### Installation
