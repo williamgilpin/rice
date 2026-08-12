@@ -28,9 +28,7 @@ temp*
 *benchmark_datasets/*
 *benchmarks/benchmark_datasets/*
 CLAUDE.md
-
-# Ignore gene ontology files
-*.gmt
+*
 
 # PyTorch checkpoints
 *.pth.tar
