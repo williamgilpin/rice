@@ -27,7 +27,8 @@ def run_deepsem(X, num_replicates=10):
     # set row index to gene names
     Xpd.index = gene_names
     Xpd.columns = cell_names
-    Xpd.transpose().to_csv("dump/data2.csv")
+    bench_dir = os.path.dirname(os.path.abspath(__file__))
+    Xpd.transpose().to_csv(os.path.join(bench_dir, "dump/data2.csv"))
 
     ## Prior is top 20% of links by Spearman correlation
     local_models_path = os.path.join(os.getcwd(), 'dygene', 'benchmarks', 'models.py')
@@ -51,16 +52,16 @@ def run_deepsem(X, num_replicates=10):
     gene_pairs.insert(0, title)
     gene_pairs = np.array(gene_pairs)
     gene_pairs = gene_pairs
-    np.savetxt("dump/label2.csv", gene_pairs, fmt="%s", delimiter=",")
+    np.savetxt(os.path.join(bench_dir, "dump/label2.csv"), gene_pairs, fmt="%s", delimiter=",")
 
-    command_str = "python DeepSEM/main.py --task non_celltype_GRN --data_file dump/data2.csv"
+    command_str = sys.executable + " DeepSEM/main.py --task non_celltype_GRN --data_file dump/data2.csv"
     command_str += " --net_file dump/label2.csv --setting default --save_name dump"
     all_cmat = list()
     for _ in range(num_replicates):
         # print("Running DeepSEM")
-        subprocess.run(command_str.split(" "), capture_output=True, text=True)
-        
-        file_path = "dump/GRN_inference_result.tsv"
+        subprocess.run(command_str.split(" "), capture_output=True, text=True, cwd=bench_dir)
+
+        file_path = os.path.join(bench_dir, "dump/GRN_inference_result.tsv")
         df = pd.read_csv(file_path, sep='\t', header=None, names=['TF', 'Target', 'EdgeWeight'], skiprows=1)
         # nodes = sorted(set(df['TF']).union(set(df['Target'])))
         # node_to_index = {node: i for i, node in enumerate(nodes)}
