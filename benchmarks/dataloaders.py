@@ -465,13 +465,21 @@ class McCalla(DataLoader):
 
     """
 
-    def __init__(self):
+    def __init__(self, goldtypes=None):
         super().__init__()
 
         self.ngenes = [1000, 500]
-        # self.goldtypes = ["KDUnion"]
-        # self.goldtypes = ["chipunion"]
-        self.goldtypes = ["chipunion_KDUnion_intersect"]
+        if goldtypes is None:
+            goldtypes = ["chipunion_KDUnion_intersect"]
+        if isinstance(goldtypes, str):
+            goldtypes = [goldtypes]
+        for goldtype in goldtypes:
+            if goldtype not in ["chipunion", "KDUnion", "chipunion_KDUnion_intersect"]:
+                raise ValueError(
+                    "gold standard type must be one of chipunion, KDUnion, "
+                    "chipunion_KDUnion_intersect"
+                )
+        self.goldtypes = goldtypes
         self.celltype = ["hESC", "yeastA2S", "yeastFBS", "mDC", "mESC"]
         # self.celltype = ["yeastA2S", "yeastFBS"]
         self.conditions = [[item] for item in list(product(self.ngenes, self.goldtypes, self.celltype))]
@@ -481,8 +489,11 @@ class McCalla(DataLoader):
 
         ngenes, goldtype, celltype = condition
 
-        if goldtype not in ["chipunion_KDUnion_intersect"]:
-            raise ValueError("gold standard type must be chipunion_KDUnion_intersect")
+        if goldtype not in ["chipunion", "KDUnion", "chipunion_KDUnion_intersect"]:
+            raise ValueError(
+                "gold standard type must be one of chipunion, KDUnion, "
+                "chipunion_KDUnion_intersect"
+            )
         
         if celltype not in ["hESC", "yeastA2S", "yeastFBS", "mDC", "mESC"]:
             raise ValueError("Celltype must be one of hESC, yeastA2S, yeastFBS, mDC, mESC")
@@ -521,11 +532,25 @@ class McCalla(DataLoader):
 
         gold_links = np.array(
             pd.read_csv(
-                os.path.join(DATADIR, f"gold_standards/{celltype}/{celltype}_{goldtype}.txt"), 
-                sep="\t", 
+                os.path.join(DATADIR, f"gold_standards/{celltype}/{celltype}_{goldtype}.txt"),
+                sep="\t",
                 header=None
             )
         )
+
+        ## The raw yeast chipunion and KDUnion files use systematic ORF names. Convert
+        ## them to display names, following the same convention as the pre-converted
+        ## chipunion_KDUnion_intersect file. The lookup table only covers genes in the
+        ## intersect gold standard, so links between unlisted genes are left untranslated
+        ## and will not match the expression data.
+        if celltype == "yeast" and goldtype in ("chipunion", "KDUnion"):
+            lookup = dict(np.loadtxt(
+                os.path.join(DATADIR, "gold_standards/yeast/gene_lookup.txt"), dtype=str
+            ))
+            gold_links = np.array([
+                [lookup.get(g1, g1).lower().capitalize(), lookup.get(g2, g2).lower().capitalize()]
+                for g1, g2 in gold_links
+            ])
         gene_names = list(df.columns)
         amat = make_goldstandard_matrix(gene_names, gold_links, mask_tf=True, symmetric=False)
         # print("Number of interactions:", np.nansum(amat))
@@ -565,11 +590,11 @@ class BEELINE(DataLoader):
     dendritic cells (mDC).
     """
 
-    def __init__(self):
+    def __init__(self, goldtypes=None):
         super().__init__()
         # self.dataset_names = ["mESC", "hESC", "hHEP", "mDC", "mHSC-E", "mHSC-GM", "mHSC-L"]
-        # self.ground_truths = ["mouse/mESC-ChIP-seq-network.csv", 
-        #                 "human/hESC-ChIP-seq-network.csv", 
+        # self.ground_truths = ["mouse/mESC-ChIP-seq-network.csv",
+        #                 "human/hESC-ChIP-seq-network.csv",
         #                 "human/HepG2-ChIP-seq-network.csv",
         #                 "mouse/mDC-ChIP-seq-network.csv",
         #                 "mouse/mHSC-ChIP-seq-network.csv",
@@ -581,10 +606,18 @@ class BEELINE(DataLoader):
         # self.conditions = [[item] for item in zip(self.dataset_names, self.ground_truths)]
 
         self.ngenes = [1000, 500]
-        self.goldtypes = ["STRING"]
-        # self.goldtypes = ["ChIP-seq"]
+        if goldtypes is None:
+            goldtypes = ["STRING"]
+        if isinstance(goldtypes, str):
+            goldtypes = [goldtypes]
+        for goldtype in goldtypes:
+            if goldtype not in ["STRING", "ChIP-seq", "Non-ChIP"]:
+                raise ValueError(
+                    "gold standard type must be one of STRING, ChIP-seq, Non-ChIP"
+                )
+        self.goldtypes = goldtypes
         self.celltype = ["mHSC-E", "mHSC-GM", "mHSC-L", "mESC", "hESC", "hHep", "mDC"]
-        self.conditions = [[item] for item in list(product(self.ngenes, self.goldtypes, self.celltype))]
+        self.conditions = [[item] for item in product(self.ngenes, self.goldtypes, self.celltype)]
         print(self.conditions)
 
     def fetch_data(self, condition, metadata=False):
@@ -594,9 +627,9 @@ class BEELINE(DataLoader):
         if n_genes not in [500, 1000]:
             raise ValueError("n_genes must be 500 or 1000")
         
-        if goldtype not in ["ChIP-seq", "STRING"]:
-            raise ValueError("gold standard type must be ChIP-seq or STRING")
-        
+        if goldtype not in ["STRING", "ChIP-seq", "Non-ChIP"]:
+            raise ValueError("gold standard type must be one of STRING, ChIP-seq, Non-ChIP")
+
         if celltype not in ["hESC", "mESC", "hHep", "mDC", "mHSC-E", "mHSC-GM", "mHSC-L"]:
             raise ValueError("Cellt ype must be one of hESC, mESC, hHep, mDC, mHSC-E, mHSC-GM, mHSC-L")
         
@@ -615,7 +648,8 @@ class BEELINE(DataLoader):
         df_pt = pd.read_csv(fpath_pt, header=0)
         df_pt.set_index(df_pt.columns[0], inplace=True)
         fpath_label = os.path.join(data_dir, "label.csv")
-        gold_links = np.array(pd.read_csv(fpath_label, header=0))
+        ## Some ChIP-seq label files carry a third Score column; keep only the gene pair
+        gold_links = np.array(pd.read_csv(fpath_label, header=0).iloc[:, :2])
 
         amat = make_goldstandard_matrix(gene_names, gold_links, mask_tf=True, symmetric=False)
 
