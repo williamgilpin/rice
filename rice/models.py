@@ -50,6 +50,8 @@ def compute_sigmas_vectorized(dists, tol=1e-6, grid_points=48):
     """
     Vectorized replacement for per-point fsolve in find_sigma.
     Solves for sigma (per column) from sum_j exp(-max(d_j - rho, 0)/(sigma+tol)) = log2(k).
+    The solved sigma is the smooth-kNN kernel bandwidth, i.e. the local scale of a
+    data-driven Riemannian metric; see `calculate_sigma` for its interpretation.
 
     Args:
         dists (np.ndarray): shape (k, n), sorted ascending per column (nearest on row 0)
@@ -119,7 +121,18 @@ def simplex_neighbors(X, metric='euclidean', k=20, tol=1e-6):
 
 def calculate_sigma(X0, d_embed=4, tol=1e-6, channelwise=True, verbose=False, cols_per_batch=1_000_000):
     """
-    Streaming (low-RAM) version of `calculate_sigma`. Avoids constructing D with shape (k, m*ntx).
+    Compute the per-timepoint kernel bandwidth (RiCE nonlinearity score field).
+
+    For each timepoint on the delay-reconstructed manifold, solves the smooth-kNN
+    normalization sum_j exp(-max(d_j - rho, 0) / sigma) = log2(k) for sigma. This
+    bandwidth is the pointwise scale of a locally adaptive (conformal) Riemannian
+    metric under which each neighborhood is uniformly distributed (McInnes et al.,
+    UMAP, arXiv:1802.03426). Neighborhoods on a reconstructed attractor dilate
+    where the flow stretches locally, so sigma tracks the local stability of the
+    underlying dynamics.
+
+    Implementation is streaming (low-RAM): avoids constructing the full distance
+    matrix D with shape (k, m*ntx).
 
     Args:
         X0 (np.ndarray): (ntx, d) matrix of time series.

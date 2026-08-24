@@ -54,7 +54,12 @@ Where `<dataset_name>` is one of the following:
 + `mccalla` is the McCalla dataset, a set of developmental single-cell RNA-seq datasets with pseudotime
 + `kuramoto` is the Kuramoto dataset, a physical nonlinear dynamical system with a known interaction network
 
-The output will be saved in the `benchmark_output` directory. Each benchmark will produce a separate output file. The output files will be named according to the benchmark name, the dataset name, and the condition. Replicates of the same experiment will be saved in the same file. 
+For the BEELINE and McCalla datasets, the `--goldtype` flag selects which gold standard network(s) to score against. One or more may be given. For BEELINE, the options are `STRING` (default), `ChIP-seq`, and `Non-ChIP`. For McCalla, the options are `chipunion`, `KDUnion`, and `chipunion_KDUnion_intersect` (default). For example,
+
+    python run_benchmarks.py --dataset beeline --model ensemble_noprune --goldtype ChIP-seq Non-ChIP
+    python run_benchmarks.py --dataset mccalla --model ensemble_noprune --goldtype chipunion
+
+The output will be saved in the `benchmark_output` directory. Each benchmark will produce a separate output file. The output files will be named according to the benchmark name, the dataset name, and the condition. Replicates of the same experiment will be saved in the same file. For the BEELINE and Kuramoto datasets, the reconstructed network matrices are also saved, in the `benchmark_output/matrices` directory (excluded from version control), so that new metrics can be computed later without re-running the benchmarks.
 
 The currently supported options for `<method_name>` are:
 

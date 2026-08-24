@@ -12,7 +12,12 @@ from pathlib import Path
 
 ontology_path_root = Path(__file__).resolve().parent
 
-def run_enrichr(all_gene_groups):
+def run_enrichr(all_gene_groups, gmt_path=None):
+    """
+    
+    curl -L 'https://maayanlab.cloud/Enrichr/geneSetLibrary?mode=text&libraryName=GO_Biological_Process_2026' -o GO_Biological_Process_2026.gmt
+    
+    """
 
     all_df = list()
     all_community_indices = list()
@@ -20,7 +25,9 @@ def run_enrichr(all_gene_groups):
     for fpath in glob.glob("test/*reports.txt"):
         os.remove(fpath)
 
-    gmt_path = ontology_path_root / "gene_ontologies" / "m7.all.v2026.1.Mm.symbols.gmt"
+    if gmt_path is None:
+        gmt_path = ontology_path_root / "gene_ontologies" / "GO_Biological_Process_2026.gmt"
+    
     # print(f"Using GMT file: {gmt_path}")
     for i, gl in enumerate(all_gene_groups):
         try:
