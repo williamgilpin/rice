@@ -8,18 +8,23 @@ import sys
 sys.path.append(os.path.join(os.path.dirname(__file__)))
 from models import LaggedCorrelations
 
-def run_deepsem(X, num_replicates=10):
+def run_deepsem(X, num_replicates=10, max_cells=None):
     """
-    Convert a data matrix into a format that DeepSEM can process, and run the 
+    Convert a data matrix into a format that DeepSEM can process, and run the
     method on the data
 
     Args:
         X (np.ndarray): A data matrix with shape (n_genes, n_samples)
         num_replicates (int): The number of replicates to run
+        max_cells (int): If set, subsample the rows of X to at most this many
+            cells, evenly spaced along the (pseudotime-ordered) first axis.
 
     Returns:
         np.ndarray: A matrix of scores for each gene-gene pair
-    """ 
+    """
+    if max_cells is not None and X.shape[0] > max_cells:
+        idx = np.linspace(0, X.shape[0] - 1, max_cells).astype(int)
+        X = X[idx]
     Xpd = pd.DataFrame(X.T)
     gene_names = ["G" + str(i).zfill(4) for i in range(X.shape[1])]
     ## make a list of all combinations of gene pairs
