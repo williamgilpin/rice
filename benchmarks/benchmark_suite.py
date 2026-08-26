@@ -260,22 +260,6 @@ def run_benchmark_model(
                 return cmat
             run_benchmark(*item, fit_model, name + "_" + output_fname, n_datasets=n_datasets)
 
-        if name == "ensemble_noprune_dense":
-            ## ensemble_noprune with a denser library-size schedule. The default
-            ## dilation_factor of 1.5 trades some accuracy for speed on small
-            ## datasets; 1.05 approximately recovers the original dense schedule.
-            def fit_model(X):
-                model = CausalDetection(
-                    d_embed=3,
-                    neighbors="simplex",
-                    forecast="smap",
-                    ensemble=True,
-                    dilation_factor=1.05,
-                )
-                cmat = model.fit(X)
-                return cmat
-            run_benchmark(*item, fit_model, name + "_" + output_fname, n_datasets=n_datasets)
-
         if name == "isolated_noprune":
             def fit_model(X):
                 model = CausalDetection(
