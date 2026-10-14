@@ -135,40 +135,6 @@ def early_precision_score(atrue, apred, **kwargs):
     return dense_score(atrue, apred, early_precision, **kwargs)
 
 
-def top_k_accuracy(atrue, apred, k=10, check_transpose=True):
-    """
-    Compute the top-k accuracy between two adjacency matrices, defined as the number of
-    top-k predicted edges that are correct
-
-    Args:
-        atrue (ndarray): The true adjacency matrix
-        apred (ndarray): The predicted adjacency matrix
-        k (int): The number of top edges to consider
-
-    Returns:
-        accuracy (float): The top-k accuracy between the two matrices
-    """
-    apred_thresh = top_k_threshold(apred, k=k)
-    num_incorrect = np.sum((atrue != apred) * apred_thresh)
-    return 1 - num_incorrect / k
-
-def topk_accuracy_score(atrue, apred, k=10, **kwargs):
-    """
-    Compute the top-k accuracy between two adjacency matrices, omitting any NaN values
-    from the calculation
-
-    Args:
-        atrue (ndarray): The true adjacency matrix
-        apred (ndarray): The predicted adjacency matrix
-        k (int): The number of top edges to consider
-        check_transpose (bool): Whether to check the correlation of the transpose of
-            the predicted matrix
-
-    Returns:
-        accuracy (float): The top-k accuracy between the two matrices
-    """
-    return dense_score(atrue, apred, top_k_accuracy, **kwargs)
-
 def top_k_precision(atrue, apred, k=10, check_transpose=True):
     """
     Compute the top-k precision between two adjacency matrices

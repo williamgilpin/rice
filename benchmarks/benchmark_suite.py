@@ -106,32 +106,6 @@ def run_benchmark(all_X, all_amat, method, output_fname, hollow=True,
 # from dataloaders import Smoketest, BEELINE, DREAM4, NonlinearDataset, SingleDataset
 
 
-def chunk_benchmark(X, process, n_chunks=2):
-    """
-    Split the data into chunks and process each chunk separately.
-
-    Args:
-        X (ndarray): The input data, of shape (T, D).
-        process (callable): The function that processes an array, producing an output
-            of shape (D, D).
-        n_chunks (int): The number of chunks to split the data into.
-
-    Returns:
-        ndarray: The processed data of shape (D, D).
-    """
-    T, D = X.shape
-    indices = np.array_split(np.arange(D), n_chunks)
-    blocks = []
-    for inds_i in indices:
-        row_blocks = []
-        for inds_j in indices:
-            X_i = X[:, inds_i]
-            X_j = X[:, inds_j]
-            # process should accept two arrays and return the corresponding block.
-            row_blocks.append(process(X_i, X_j))
-        blocks.append(np.hstack(row_blocks))
-    return np.vstack(blocks)
-
 
 model_list = [
     # "regdiffusion", #

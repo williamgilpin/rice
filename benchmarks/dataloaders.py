@@ -19,30 +19,6 @@ from itertools import product
 sys.path.append(os.path.join(file_path, ".."))
 from rice.utils import indices_to_adjacency
 
-def quantile_binning(data, n=100, agg=np.nanmean):
-    """
-    Bin data into evenly spaced quantiles and apply an aggregation function to each bin
-
-    Args:
-        data (np.ndarray): data to bin
-        n (int): number of bins
-        agg (function): aggregation function to apply to each bin
-
-    Returns:
-        quantiles (np.ndarray): quantile values
-        bin_vals (np.ndarray): aggregated values for each bin
-    """
-    quantiles = np.linspace(0, 1, n+1)
-    bin_edges = np.quantile(data, quantiles)
-    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
-    indices = np.digitize(data, bin_edges, right=True) - 1
-    indices = np.clip(indices, 0, n-1)
-    bin_vals = np.array([
-        agg(data[indices == i]) if np.any(indices == i) else np.nan
-        for i in range(n)
-    ])
-    return bin_centers, bin_vals
-
 def make_goldstandard_matrix(gene_names, gold_links, interactions=None,
                              mask_tf=True, symmetric=False):
     """Given a list of gene names and a list of known interactions, create a gold 

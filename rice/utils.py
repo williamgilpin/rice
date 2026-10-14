@@ -338,68 +338,6 @@ def embed_ts_sfa(X, m=10, scaled=False):
     return Xe_sfa
 
 from scipy.stats import t as t_dist
-def batch_pearson_memmap(dtype, shape, y_path=None,
-                         mode='r', chunk_size=10_000_000, pvalue=False, eps=1e-8):
-    """
-    Memory-mapped, chunk-wise Pearson correlation along the last axis.
-
-    Args:
-        dtype: data type of x
-        shape (tuple): full shape of x
-        y_path (str, optional): filename of .npy for y; if None, uses sorted(x)
-        mode (str): numpy.memmap mode
-        chunk_size (int): max elements to load per chunk
-        pvalue (bool): if True, also return two-tailed p-value
-        eps (float): stabilizer to avoid zero-division
-
-    Returns:
-        corr (ndarray[...,]) or (corr, pvalue)
-    """
-    # open x (and y) as memmaps
-    x = np.memmap("temp_pearson.npy", dtype=dtype, mode=mode, shape=shape)
-    if y_path is None:
-        # if sorting required, do it in‐place in small blocks
-        y = np.empty_like(x)
-        # sort each slice along last axis chunk-wise
-        for idx in np.ndindex(*shape[:-1]):
-            y[idx] = np.sort(x[idx], axis=-1)
-    else:
-        y = np.memmap(y_path, dtype=dtype, mode=mode, shape=shape)
-
-    n = shape[-1]
-    out_shape = shape[:-1]
-    sum_x  = np.zeros(out_shape, np.float64)
-    sum_y  = np.zeros(out_shape, np.float64)
-    sum_x2 = np.zeros(out_shape, np.float64)
-    sum_y2 = np.zeros(out_shape, np.float64)
-    sum_xy = np.zeros(out_shape, np.float64)
-
-    # process in chunks along the last axis
-    for start in range(0, n, chunk_size):
-        stop = min(start + chunk_size, n)
-        xs = x[..., start:stop]
-        ys = y[..., start:stop]
-
-        sum_x  += xs.sum(axis=-1)
-        sum_y  += ys.sum(axis=-1)
-        sum_x2 += np.einsum('...i,...i->...', xs, xs)
-        sum_y2 += np.einsum('...i,...i->...', ys, ys)
-        sum_xy += np.einsum('...i,...i->...', xs, ys)
-
-    cov   = sum_xy - sum_x * sum_y / n
-    var_x = sum_x2  - sum_x**2  / n
-    var_y = sum_y2  - sum_y**2  / n
-
-    denom = np.sqrt(var_x * var_y) + eps
-    corr = cov / denom
-
-    if pvalue:
-        t_stat = corr * np.sqrt((n - 2) / (1 - corr**2 + eps))
-        p      = 2 * t_dist.sf(np.abs(t_stat), df=n - 2)
-        return corr, p
-
-    return corr
-
 def indices_to_adjacency(indices, nval=None):
     """
     Convert a list of indices to an adjacency matrix
@@ -494,79 +432,6 @@ def batch_pearson(x, y=None, pvalue=False, eps=1e-8):
 #         p_value = 2 * t_dist.sf(np.abs(t_stat), df=n-2)
 #         return corr, p_value
 #     return corr
-
-from scipy.stats import spearmanr, pearsonr, binned_statistic
-
-def binned_statistic_bootstrapped(x, values, statistic='mean', bins=10, range=None):
-    """
-    Compute a binned statistic of the input data with bootstrapping.
-    
-    Args:
-        x (array_like):  Input data to be binned.
-        values (array_like): Values to compute the statistic for.
-        statistic (str or callable, optional): The statistic to compute. Default is 'mean'.
-        bins (int or sequence of scalars, optional): The number of bins or the bin edges. Default is 10.
-        range (tuple, optional): The lower and upper range of the bins. Default is None.
-    
-    Returns:
-        bin_means (array_like): The computed binned means.
-        bin_errors (array_like): The bootstrapped errors for each bin.
-        bin_edges (array_like): The edges of the bins.
-        bin_number (array_like): The bin number for each value in x.
-    """
-    # Compute the binned statistic
-    bin_means, bin_edges, bin_number = binned_statistic(
-        x, values, statistic=statistic, bins=bins, range=range
-    )
-    
-    # Compute the bootstrapped errors
-    bin_errors = np.zeros_like(bin_means)
-    for i in np.arange(len(bin_means)):
-        bin_indices = np.where(bin_number == i)[0]
-        if len(bin_indices) > 0:
-            bootstrap_samples = np.random.choice(
-                values[bin_indices], size=(1000, len(bin_indices)), replace=True
-            )
-            bootstrap_means = np.mean(bootstrap_samples, axis=1)
-            bin_errors[i] = np.std(bootstrap_means)
-    
-    return bin_means, bin_errors, bin_edges, bin_number
-
-def pearsonr_excluded(x, y):
-    """Compute Pearson correlation excluding NaN values."""
-    x, y = np.asarray(x), np.asarray(y)
-    mask = ~np.isnan(x) & ~np.isnan(y)
-    return pearsonr(x[mask], y[mask])
-
-def spearmanr_binned(a, b, nbins=20, agg="mean", sort_on="x", **kwargs):
-    """A binned version of scipy's spearmanr function. This function accounts for
-    differences in the number of datapoints across value ranges in a dataset, thus
-    avoiding bias due to uneven sampling.
-
-    Args:
-        a (array-like): First variable to correlate.
-        b (array-like): Second variable to correlate.
-        nbins (int): Number of bins to use for binning the data.
-        agg (str): Aggregation function to use. Can be 'mean', 'median', or 'std'.
-        sort_on (str): Which variable to sort on before binning. Can be 'x' or 'y'.
-        **kwargs: Additional arguments to pass to scipy's spearmanr function.
-
-    Returns:
-        corr (scipy.stats.SpearmanrResult): Spearman correlation result object.
-    """
-    if sort_on == "x":
-        sort_idx = np.argsort(a)
-    else:
-        sort_idx = np.argsort(b)
-    a_sorted = a[sort_idx]
-    b_sorted = b[sort_idx]
-    bin_edges = np.linspace(a.min(), a.max(), nbins)
-    bin_means_a, edges_a, bin_number_a = binned_statistic(a_sorted, a_sorted, statistic=agg, bins=bin_edges)
-    bin_means_b, edges_b, bin_number_b = binned_statistic(a_sorted, b_sorted, statistic=agg, bins=bin_edges)
-
-    # corr = pearsonr_excluded(bin_means_a, bin_means_b, **kwargs)
-    corr = spearmanr(bin_means_a, bin_means_b, **kwargs)
-    return corr
 
 def batch_spearman(x, y=None, pvalue=False):
     """
@@ -686,67 +551,6 @@ def max_linear_correlation_ridge(A, B, alpha=1e-3, return_pvalue=False):
     else:
         return corr
     
-from scipy.sparse.linalg import cg, LinearOperator
-def approx_ridge_cg(A, b, lambda_reg, rtol=1e-6, atol=1e-8, maxiter=None, use_precond=True):
-    """
-    Solve min_x ||A x - b||^2 + λ||x||^2 approximately via CG,  without forming A^T A 
-    explicitly.
-
-    Args:
-        A (np.ndarray): (T, M) design matrix
-        b (np.ndarray): (T,) target vector
-        lambda_reg (float): Ridge regularization parameter
-        tol (float): CG tolerance
-        maxiter (int): Maximum number of CG iterations
-
-    Returns:
-        x (np.ndarray): (M,) solution vector
-    """
-    M = A.shape[1]
-
-    # Define the linear operator for (AᵀA + λI)
-    def mv(v):
-        return A.T @ (A @ v) + lambda_reg * v
-    linop = LinearOperator((M, M), matvec=mv)
-
-    # Build simple diagonal preconditioner M ≈ (AᵀA + λI)^(-1)
-    M_inv = None
-    if use_precond:
-        # diag_j = ∑ₜ Aₜⱼ² + λ
-        diag = np.einsum('tm,tm->m', A, A) + lambda_reg
-        M_inv = LinearOperator((M, M), matvec=lambda v: v / diag)
-
-    # Solve using CG with both rtol and atol
-    x, info = cg(
-        linop,
-        A.T @ b,
-        rtol=rtol,
-        atol=atol,
-        maxiter=maxiter or M,
-        M=M_inv
-    )
-    if info > 0:
-        raise RuntimeError(f"CG failed to converge after {info} iterations")
-    return x
-
-from scipy.sparse.linalg import lsqr
-def ridge_lsqr(A, b, lambda_reg, tol=1e-8):
-    """
-    Solve min ||A x - b||^2 + λ ||x||^2 via the damped LSQR algorithm.
-
-    Args:
-        A (np.ndarray): (T, M) design matrix
-        b (np.ndarray): (T,) target vector
-        lambda_reg (float): Ridge regularization parameter
-        tol (float): Tolerance for the solution
-
-    Returns:
-        x (np.ndarray): (M,) solution vector
-    """
-    damp = np.sqrt(lambda_reg)
-    sol = lsqr(A, b, damp=damp, atol=tol, btol=tol, iter_lim=A.shape[1])
-    return sol[0]
-
 def banded_matrix(n, r, m=None):
     """
     Create a banded matrix with a band radius of r around the main diagonal
@@ -818,35 +622,6 @@ def debug_print(i, name="dump.txt", include_time=True, reset=False):
             f.write(f"{elapsed_time:.3f}s: {i}\n")
         else:
             f.write(f"{i}\n")
-
-def unique_dict(dict_list, duplicate_keys):
-    """
-    Remove duplicates from a list of dictionaries based on specified keys, preserving order.
-    Dictionaries are considered duplicates if they have the same values for all specified keys.
-
-    Args:
-        dict_list (list): A list of dictionaries
-        duplicate_keys (list): A list of keys to check for duplicates. Dictionaries with
-            the same values for these keys will be considered duplicates.
-
-    Returns:
-        list: A list of dictionaries with duplicates removed, preserving the original order
-    """
-    seen = set()
-    unique_dicts = []
-    
-    for d in dict_list:
-        # Create a tuple of values for the specified keys
-        key_values = tuple(d.get(k) for k in duplicate_keys)
-        
-        # If we haven't seen these values before, add the dictionary
-        if key_values not in seen:
-            seen.add(key_values)
-            unique_dicts.append(d)
-            
-    return unique_dicts
-
-
 
 class StreamingCorrelation:
     """
