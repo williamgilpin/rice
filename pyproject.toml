@@ -18,6 +18,7 @@ dependencies = [
     "scipy",
     "scikit-learn",
     "hnswlib",
+    "huggingface-hub>=2.2.0",
 ]
 
 # Optional dependencies
